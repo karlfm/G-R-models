@@ -4,62 +4,45 @@ import numpy as np
 import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
+from pathlib import Path
 
 
 '''TODO: REMOVE THIS'''
 
 def define_bcs(mixedSpace, mesh):
-    """
-    Defines boundary conditions based on displacement, assuming the domain
-    has a box-like shape. We'll keep the displacement on the sides defined
-    by lowest x coord, y coords and z coords fixed in their respective planes.
 
-    Args:
-        state_space (FunctionSpace): function space for displacement and pressure
-        mesh (dolfinx.Mesh): Domain in which we solve the problem
 
-    Returns:
-        List of boundary conditions
-    """
-
+    # Gets the geometry/spatial values of the mesh and finds the smallets values in each direction
     coords = mesh.geometry.x
     xmin = min(coords[:, 0])
     ymin = min(coords[:, 1])
     zmin = min(coords[:, 2])
 
-    xmin_bnd = lambda x: np.isclose(x[0], xmin)
-    ymin_bnd = lambda x: np.isclose(x[1], ymin)
-    zmin_bnd = lambda x: np.isclose(x[2], zmin)
+    # functions that will give you the closest x value of the mesh in each direction
+    xmin_bnd = lambda x: np.isclose(x[0], xmin)     # Tells if point is _on_ boundary
+    ymin_bnd = lambda x: np.isclose(x[1], ymin)     # Tells if point is _on_ boundary
+    zmin_bnd = lambda x: np.isclose(x[2], zmin)     # Tells if point is _on_ boundary
     corner = lambda x: np.logical_and(
         np.logical_and(xmin_bnd(x), ymin_bnd(x)), zmin_bnd(x),
     )
 
-    bcs = []
-
-    # fix three of the boundaries in their respective planes
-
+    # A list of the functions created above
     bnd_funs = [xmin_bnd, ymin_bnd, zmin_bnd]
-    components = [0, 1, 2]
 
-    V0, _ = mixedSpace.sub(0).collapse()
+    # What is V0? It is the first (?) function of the mixed function space and is collapsed (?)?
+    
+    V0, _ = mixedSpace.sub(0).collapse()    #.sub(0) returns first subspace; .collapse() makes it a actual function space (since it is a dimension lower)
 
-    for bnd_fun, comp in zip(bnd_funs, components):
-        V_c, _ = V0.sub(comp).collapse()
-        u_fixed = dolfinx.fem.Function(V_c)
-        u_fixed.vector.array[:] = 0
-        dofs = dolfinx.fem.locate_dofs_geometrical(
-            (mixedSpace.sub(0).sub(comp), V_c), bnd_fun,
-        )
-        bc = dolfinx.fem.dirichletbc(u_fixed, dofs, mixedSpace.sub(0).sub(comp))
+    bcs = []
+    for comp, bnd_fun in enumerate(bnd_funs):
+        V_c, _ = V0.sub(comp).collapse()                                            # V0.sub(0) = x etc.
+        u_fixed = dolfinx.fem.Function(V_c)                                         # recasts V_c to a dolfinx function?
+        u_fixed.vector.array[:] = 0                                                 # set all values equal to zero
+        dofs = dolfinx.fem.locate_dofs_geometrical(                                 # 
+            (mixedSpace.sub(0).sub(comp), V_c), bnd_fun,                            # finds all x, y, or z values that are on boundary surface
+        )                                                                           # 
+        bc = dolfinx.fem.dirichletbc(u_fixed, dofs, mixedSpace.sub(0).sub(comp))    # mixedSpace.sub(0).sub(comp) vec -> vec -> vec
         bcs.append(bc)
-
-    # fix corner completely
-
-    u_fixed = dolfinx.fem.Function(V0)
-    u_fixed.vector.array[:] = 0
-    dofs = dolfinx.fem.locate_dofs_geometrical((mixedSpace.sub(0), V0), corner)
-    bc = dolfinx.fem.dirichletbc(u_fixed, dofs, mixedSpace.sub(0))
-    bcs.append(bc)
 
     return bcs
 
@@ -82,33 +65,42 @@ dx = ufl.Measure("dx", domain=mesh, metadata={"quadrature_degree": 4})
 
 '''MATH'''
 
-act_strn = lambda t              : 2 / (50**5) * t ** (5 - 1) * np.exp(-t / 50)  # from Aashilds code
+# Psi_neoH = lambda u              : 2 * (ufl.tr(C(u)) - 3)  # (neo-hookian)
+
+stretch  = lambda t              : 1 # 2 / (50**5) * t ** (5 - 1) * np.exp(-t / 50)  # from Aashilds code
 sqrt_fun = lambda s              : (1 - s) ** (-0.5)
+
 I        = lambda u              : ufl.Identity(len(u))
-F        = lambda u              : ufl.variable(I(u) + ufl.grad(u))
-F_a      = lambda s              : ufl.as_tensor(((1 - s, 0, 0), (0, sqrt_fun(s), 0), (0, 0, sqrt_fun(s))))
-F_e      = lambda s, u           : ufl.variable(F(u) * ufl.inv(F_a(s)))
-J        = lambda u              : ufl.det(F(u))
-C        = lambda u              : pow(J(u), -float(2 / 3)) * F(u).T * F(u)
+F_lambda = lambda u              : ufl.variable(I(u) + ufl.grad(u))
+
+J        = lambda F              : ufl.det(F)
+C        = lambda F              : pow(J(F), -float(2 / 3)) * F.T * F
+
+F_g      = lambda s              : ufl.as_tensor(((1 - s, 0, 0), (0, sqrt_fun(s), 0), (0, 0, sqrt_fun(s))))
+F_e      = lambda s, F           : ufl.variable(F * ufl.inv(F_g(s)))
 e1       = lambda                : ufl.as_vector([1.0, 0.0, 0.0])
+
 cond     = lambda a              : ufl.conditional(a > 0, a, 0)
-Psi_neoH = lambda u              : 2 * (ufl.tr(C(u)) - 3)  # (neo-hookian)
-W_hat    = lambda u              : 0.074 / (2 * 4.878) * (ufl.exp(4.878 * (ufl.tr(C(u)) - 3)) - 1)
-W_f      = lambda u              : 2.628 / (2 * 5.214) * (ufl.exp(5.214 * cond(ufl.inner(C(u) * e1(), e1()) - 1) ** 2) - 1)
-Psi_Holz = lambda u              : W_hat(u) + W_f(u)
-P        = lambda s, p, u        : ufl.det(F_a(s)) * ufl.diff(Psi_Holz(u), F_e(s, u)) * ufl.inv(F_a(s).T) + p * J(u) * ufl.inv(F(u).T)
-weakP    = lambda s, u, v, p, dx : ufl.inner(P(s, p, u), ufl.grad(v)) * dx  # elasticity term
-weakPres = lambda u, q, dx       : q * (J(u) - 1) * dx  # pressure term??
+W_hat    = lambda F              : 0.074 / (2 * 4.878) * (ufl.exp(4.878 * (ufl.tr(C(F)) - 3)) - 1)
+W_f      = lambda F              : 2.628 / (2 * 5.214) * (ufl.exp(5.214 * cond(ufl.inner(C(F) * e1(), e1()) - 1) ** 2) - 1)
+Psi_Holz = lambda F              : W_hat(F) + W_f(F)                                            
+P        = lambda s, p, F        : ufl.diff(Psi_Holz(F_e(s, F)), F) + p * J(F_e(s, F)) * ufl.inv(F_e(s, F).T)   # Referemce Tensor
+weakP    = lambda s, F, v, p, dx : ufl.inner(P(s, p, F_e(s, F)), ufl.grad(v)) * dx                              # Elasticity term
+weakPres = lambda F, q, dx       : q * (J(F) - 1) * dx                                                          # Pressure term??
 
 '''SOLVE PDE's'''
 
-time = np.linspace(0, 1000, 1000)
-active_values = act_strn(time)
+time1 = np.linspace(0, 0.5, 500)
+time2 = 0.5*np.ones(500)
+time  = np.concatenate((time1, time2))
+
 active_fun = dolfinx.fem.Constant(mesh, PETSc.ScalarType(0))
 
 boundaryConditions = define_bcs(mixedSpace, mesh)
 
-weak_form = weakP(active_fun, u, v, p, dx) + weakPres(u, q, dx)
+F = F_lambda(u)
+
+weak_form = weakP(active_fun, F, v, p, dx) + weakPres(F, q, dx)
 
 problem = dolfinx.fem.petsc.NonlinearProblem(weak_form, functions, boundaryConditions)
 solver = dolfinx.nls.petsc.NewtonSolver(mesh.comm, problem)
@@ -117,19 +109,26 @@ solver.rtol = 1e-4
 solver.atol = 1e-4
 solver.convergence_criterium = "incremental"
 
+# Not really sure about this
 AA = ufl.VectorElement("Lagrange", mesh.ufl_cell(), 1)
 BB = dolfinx.fem.FunctionSpace(mesh, AA)
 u1 = dolfinx.fem.Function(BB)
 
-fout = dolfinx.io.XDMFFile(mesh.comm, "myDisplacementHolz.xdmf", "w")
+filename = Path("myDisplacementHolz.xdmf")
+filename.unlink(missing_ok=True)
+filename.with_suffix(".h5").unlink(missing_ok=True)
+fout = dolfinx.io.XDMFFile(mesh.comm, filename, "w")
 fout.write_mesh(mesh)
 
-for (i, a) in enumerate(active_values):
-    if i % 50 == 0:
-        print(f"Active tension value: {a:.2f}; step {i}")
-    active_fun.value = a
+for (i, a) in enumerate(time):
+    if (i+1) % 100 == 0:
+        print(f"Growth tensor: {str(F_g(a))}; step {i+1}")
+        print(f"Elasticity tensor: {str(F_e(a, F))}; step {i+1}")
+    active_fun.value = a #bytt med iopodarterubg op F_g
+    # F_g(adisa) = ny verdi
     solver.solve(functions)
     u, _ = functions.split()
     u1.interpolate(u)
-    fout.write_function(u1, a)
-fout.close
+    fout.write_function(u1, i)
+
+fout.close()
