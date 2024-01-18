@@ -6,6 +6,43 @@ from mpi4py import MPI
 from petsc4py import PETSc
 from pathlib import Path
 
+def project(v, target_func, bcs=[]):
+     
+    """Project UFL expression.
+
+    Note
+    ----
+    This method solves a linear system (using KSP defaults).
+    """
+    # Ensure we have a mesh and attach to measure
+    V = target_func.function_space
+    dx = ufl.dx(V.mesh)
+    # Define variational problem for projection
+    w = ufl.TestFunction(V)
+    Pv = ufl.TrialFunction(V)
+    a = dolfinx.fem.form(ufl.inner(Pv, w) * dx)
+    L = dolfinx.fem.form(ufl.inner(v, w) * dx)
+    # Assemble linear system
+    A = dolfinx.fem.petsc.assemble_matrix(a, bcs)
+    A.assemble()
+    b = dolfinx.fem.petsc.assemble_vector(L)
+    dolfinx.fem.petsc.apply_lifting(b, [a], [bcs])
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    dolfinx.fem.petsc.set_bc(b, bcs)
+        # Solve linear system
+    solver = PETSc.KSP().create(A.getComm())
+    solver.setOperators(A)
+    solver.solve(b, target_func.vector)
+    # Destroy PETSc linear algebra objects and solver
+    solver.destroy()
+    A.destroy()
+    b.destroy()
+    
+def toDebug(F):
+    W = dolfinx.fem.FunctionSpace(mesh, ufl.TensorElement("Discontinuous Lagrange", mesh.ufl_cell(), 0))
+    F_proj = dolfinx.fem.Function(W)
+    project(F, F_proj)
+    return F_proj
 
 '''TODO: REMOVE THIS'''
 
@@ -64,11 +101,16 @@ v, q = ufl.TestFunctions(mixedSpace)
 dx = ufl.Measure("dx", domain=mesh, metadata={"quadrature_degree": 4})
 
 '''CONSTANTS'''
+C_pas = 0.44
+b_f = 18.5
+b_t = 3.58
+b_fr = 1.63
+C_comp = 350
 
 f_ffmax = 0.3
 f_f = 150
 s_l50 = 0.06
-F_ff50 = 1.35
+F_ff50 = 2.35
 f_lengthslope = 40
 f_ccmax = 0.1
 c_f = 75
@@ -76,44 +118,72 @@ s_t50 = 0.07
 F_cc50 = 1.28
 c_thicknessslope = 60
 
+E_ffset = 1     #THE PAPER DOESNT SPECIFY
+
 '''MATH'''
+I = ufl.Identity(3)                                 # Identity tensor
+F = ufl.variable(I + ufl.grad(u))                   # Deformation tensor
+currentF = F
 
-k_ff     = lambda s              : 1 / (1 + exp_fun(f_lengthslope*(s - F_ff50)))
-kerchoff = lambda s              : k_ff(s)#*(f_ffmax/1 + np.exp(-f_f(1 - s_l50)))
-F_giff   = lambda s              : ufl.as_tensor(((kerchoff(s), 0, 0), (0, sqrt_fun(kerchoff(s)), 0), (0, 0, sqrt_fun(kerchoff(s)))))
+s_l = 1
+s_t = 1
 
-stretch  = lambda t              : 1 # 2 / (50**5) * t ** (5 - 1) * np.exp(-t / 50)  # from Aashilds code
-sqrt_fun = lambda s              : (1 - s) ** (-0.5)
-exp_fun  = lambda s              : (1 + 0.5*s + 1/9*s**2 + 1/72*s**3 + 1/1008*s**4 + 1/30240*s**5)/(1 - 0.5*s + 1/9*s**2 - 1/72*s**3 + 1/1008*s**4 - 1/30240*s**5)
-sqrt_fun = lambda s              : (1 + 5/4*s + 5/16*s**2)/(1 + 3/4*s + 1/16*s**2)
+prevF_g = ufl.variable(F)
 
-I        = lambda u              : ufl.Identity(len(u))
-F_lambda = lambda u              : ufl.variable(I(u) + ufl.grad(u))
+k_ff = 1 / (1 + ufl.exp(f_lengthslope*(prevF_g[0,0] - F_ff50)))
+k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(prevF_g[1,1] - F_cc50)))
 
-J        = lambda F              : ufl.det(F)
-C        = lambda F              : pow(J(F), -float(2 / 3)) * F.T * F
-# E        = lambda F              : 1/2*(F.T*F - I(F))
+F_gff = ufl.conditional(ufl.ge(s_l,0),
+                        k_ff*f_ffmax/(1 + ufl.exp(-f_f*(s_l - s_l50))) + 1,
+                        -f_ffmax/(1 + ufl.exp(f_f*(s_l + s_l50))) + 1)
 
-F_g      = lambda s              : ufl.as_tensor(((1 - s, 0, 0), (0, exp_fun(s), 0), (0, 0, exp_fun(s))))
-F_e      = lambda s, F           : ufl.variable(F * ufl.inv(F_giff(s)))
+F_gcc = ufl.conditional(ufl.ge(s_t,0), 
+                        ufl.sqrt(k_cc*f_ccmax/(1 + ufl.exp(-c_f*(s_t - s_t50))) + 1), 
+                        ufl.sqrt(-f_ccmax/(1 + ufl.exp(c_f*(s_t - s_t50))) + 1))
 
-neoHook  = lambda F              : ufl.tr(C(F))
-P        = lambda s, p, F        : (ufl.diff(neoHook(F_e(s, F)), F) + p * J(F_e(s, F)) * ufl.inv(F_e(s, F).T))   # Referemce Tensor
-weakP    = lambda s, F, v, p, dx : ufl.inner(P(s, p, F_e(s, F)), ufl.grad(v)) * dx                              # Elasticity term
-weakPres = lambda F, q, dx       : q * (J(F) - 1) * dx                                                          # Pressure term??
+F_g = ufl.as_tensor(((F_gff, 0, 0),
+                     (0, F_gcc, 0),
+                     (0, 0, F_gcc)))
+
+F_e = ufl.variable(F * ufl.inv(F_g))
+
+breakpoint()
+E = 1/2*(F_e.T*F_e - I)                                 # Green-Lagrange tensor (difference tensor)
+
+'''Strain Energy Density Function'''
+Q = b_f*E[0, 0]**2 + b_t*(E[1, 1]**2 + E[2, 2]**2 + 2*E[1, 2]*E[2, 1]) + b_fr*(2*E[0, 1]*E[1, 0] + 2*E[0, 2]*E[2, 0])
+
+E_cross = ufl.as_tensor(((E[1, 1], E[1, 2]), (E[2, 1], E[2, 2])))
+
+'''STRAIN TENSORS'''
+
+J = ufl.det(F_e)                                      # Determinant of deformation tensor
+C = pow(J, -float(2 / 3)) * F_e.T * F_e                 # Cauchy-Green tensor (ratio tensor)
+
+W_pas = 1/2*C_pas*(ufl.exp(Q - 1))
+W_comp = 1/2*C_comp*(J - 1)*ufl.ln(J)
+
+W = W_pas + W_comp
+
+P = (ufl.diff(W, F_e) + p * J * ufl.inv(F_e.T))
+
+weakP = ufl.inner(P, ufl.grad(v)) * dx 
+weakPres = q * (J - 1) * dx
 
 '''SOLVE PDE's'''
 
-time1 = np.linspace(0, 1, 500)
-time2 = np.ones(500)
-time  = np.concatenate((time1, time2))
 
-active_fun = dolfinx.fem.Constant(mesh, PETSc.ScalarType(0))
+
+# time2 = 0.5*np.ones(50)
+# time  = np.concatenate((time1, time2))
 
 boundaryConditions = define_bcs(mixedSpace, mesh)
 
-F = F_lambda(u)
-weak_form = weakP(active_fun, F, v, p, dx) + weakPres(F, q, dx)
+# E = 1/2*(F.T*F - I)
+
+prevF = ufl.Identity(3)
+
+weak_form = weakP + weakPres
 
 problem = dolfinx.fem.petsc.NonlinearProblem(weak_form, functions, boundaryConditions)
 solver = dolfinx.nls.petsc.NewtonSolver(mesh.comm, problem)
@@ -133,12 +203,18 @@ filename.with_suffix(".h5").unlink(missing_ok=True)
 fout = dolfinx.io.XDMFFile(mesh.comm, filename, "w")
 fout.write_mesh(mesh)
 
-for (i, a) in enumerate(time):
-    if (i+1) % 100 == 0:
-        print(f"Growth tensor: {str(F_g(a))}; step {i+1}")
-        print(f"Elasticity tensor: {str(F_e(a, F))}; step {i+1}")
-    active_fun.value = a
+for i in range(1000):
+    if (i+1) % 400 == 0:
+        asd = toDebug(prevF_g)
+        print(f"Growth k_ff: {asd.x.array}; step {i+1}")
+        # print(f"Growth k_cc: {k_cc}; step {i+1}")
+    # prevF *= F_g(a,\ F_lambda(u))
     solver.solve(functions)
+
+    prevF_g *= F_g
+    k_ff = 1 / (1 + ufl.exp(f_lengthslope*(prevF_g[0,0] - F_ff50)))
+    k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(prevF_g[1,1] - F_cc50)))
+
     u, _ = functions.split()
     u1.interpolate(u)
     fout.write_function(u1, i)
