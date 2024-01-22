@@ -6,47 +6,10 @@ from mpi4py import MPI
 from petsc4py import PETSc
 from pathlib import Path
 
-def project(v, target_func, bcs=[]):
-     
-    """Project UFL expression.
-
-    Note
-    ----
-    This method solves a linear system (using KSP defaults).
-    """
-    # Ensure we have a mesh and attach to measure
-    V = target_func.function_space
-    dx = ufl.dx(V.mesh)
-    # Define variational problem for projection
-    w = ufl.TestFunction(V)
-    Pv = ufl.TrialFunction(V)
-    a = dolfinx.fem.form(ufl.inner(Pv, w) * dx)
-    L = dolfinx.fem.form(ufl.inner(v, w) * dx)
-    # Assemble linear system
-    A = dolfinx.fem.petsc.assemble_matrix(a, bcs)
-    A.assemble()
-    b = dolfinx.fem.petsc.assemble_vector(L)
-    dolfinx.fem.petsc.apply_lifting(b, [a], [bcs])
-    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-    dolfinx.fem.petsc.set_bc(b, bcs)
-        # Solve linear system
-    solver = PETSc.KSP().create(A.getComm())
-    solver.setOperators(A)
-    solver.solve(b, target_func.vector)
-    # Destroy PETSc linear algebra objects and solver
-    solver.destroy()
-    A.destroy()
-    b.destroy()
-    
-def toDebug(F):
-    W = dolfinx.fem.FunctionSpace(mesh, ufl.TensorElement("Discontinuous Lagrange", mesh.ufl_cell(), 0))
-    F_proj = dolfinx.fem.Function(W)
-    project(F, F_proj)
-    return F_proj
 
 '''TODO: REMOVE THIS'''
 
-def define_bcs(mixedSpace, mesh):
+def define_bcs(V, mesh):
 
 
     # Gets the geometry/spatial values of the mesh and finds the smallets values in each direction
@@ -68,17 +31,15 @@ def define_bcs(mixedSpace, mesh):
 
     # What is V0? It is the first (?) function of the mixed function space and is collapsed (?)?
     
-    V0, _ = mixedSpace.sub(0).collapse()    #.sub(0) returns first subspace; .collapse() makes it a actual function space (since it is a dimension lower)
-
     bcs = []
     for comp, bnd_fun in enumerate(bnd_funs):
-        V_c, _ = V0.sub(comp).collapse()                                            # V0.sub(0) = x etc.
+        V_c, _ = V.sub(comp).collapse()          #V.sub(n) = function in n'th direction; collapse() makes it a proper (?) functionspace.
         u_fixed = dolfinx.fem.Function(V_c)                                         # recasts V_c to a dolfinx function?
         u_fixed.vector.array[:] = 0                                                 # set all values equal to zero
         dofs = dolfinx.fem.locate_dofs_geometrical(                                 # 
-            (mixedSpace.sub(0).sub(comp), V_c), bnd_fun,                            # finds all x, y, or z values that are on boundary surface
+            (V.sub(comp), V_c), bnd_fun,                            # finds all x, y, or z values that are on boundary surface
         )                                                                           # 
-        bc = dolfinx.fem.dirichletbc(u_fixed, dofs, mixedSpace.sub(0).sub(comp))    # mixedSpace.sub(0).sub(comp) vec -> vec -> vec
+        bc = dolfinx.fem.dirichletbc(u_fixed, dofs, V.sub(comp))    # mixedSpace.sub(0).sub(comp) vec -> vec -> vec
         bcs.append(bc)
 
     return bcs
@@ -89,16 +50,37 @@ def define_bcs(mixedSpace, mesh):
 mesh = dolfinx.mesh.create_unit_cube(MPI.COMM_WORLD, 2, 2, 2)
 
 P2 = ufl.VectorElement("Lagrange", mesh.ufl_cell(), 2)
-P1 = ufl.FiniteElement("Lagrange", mesh.ufl_cell(), 1)
 
-mixedSpace = dolfinx.fem.FunctionSpace(mesh, P2 * P1)
+V = dolfinx.fem.FunctionSpace(mesh, P2)
 
-functions = dolfinx.fem.Function(mixedSpace)
+u = dolfinx.fem.Function(V)
 
-u, p = ufl.split(functions)
-v, q = ufl.TestFunctions(mixedSpace)
+v = ufl.TestFunction(V)
 
 dx = ufl.Measure("dx", domain=mesh, metadata={"quadrature_degree": 4})
+
+x = ufl.SpatialCoordinate(mesh)
+
+def eval_expression(expr, point):
+    # Determine what process owns a point and what cells it lies within
+    _, _, owning_points, cells = dolfinx.cpp.geometry.determine_point_ownership(
+        mesh._cpp_object, point, 1e-6)
+    owning_points = np.asarray(owning_points).reshape(-1, 3)
+
+    # Pull owning points back to reference cell
+    mesh_nodes = mesh.geometry.x
+    cmap = mesh.geometry.cmaps[0]
+    ref_x = np.zeros((len(cells), mesh.geometry.dim),
+                     dtype=mesh.geometry.x.dtype)
+    for i, (point, cell) in enumerate(zip(owning_points, cells)):
+        geom_dofs = mesh.geometry.dofmap[cell]
+        ref_x[i] = cmap.pull_back(point.reshape(-1, 3), mesh_nodes[geom_dofs])
+    if len(cells) > 0:
+        # NOTE: Expression lives on only this communicator rank
+        d_expr = dolfinx.fem.Expression(expr, ref_x, comm=MPI.COMM_SELF)
+        values = d_expr.eval(mesh, np.asarray(cells).astype(np.int32))
+        return values
+
 
 '''CONSTANTS'''
 C_pas = 0.44
@@ -125,10 +107,10 @@ I = ufl.Identity(3)                                 # Identity tensor
 F = ufl.variable(I + ufl.grad(u))                   # Deformation tensor
 currentF = F
 
-s_l = 1
-s_t = 1
+s_l = dolfinx.fem.Constant(mesh, 0.0)
+s_t = dolfinx.fem.Constant(mesh, 0.0)
 
-prevF_g = ufl.variable(F)
+prevF_g = F
 
 k_ff = 1 / (1 + ufl.exp(f_lengthslope*(prevF_g[0,0] - F_ff50)))
 k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(prevF_g[1,1] - F_cc50)))
@@ -145,10 +127,9 @@ F_g = ufl.as_tensor(((F_gff, 0, 0),
                      (0, F_gcc, 0),
                      (0, 0, F_gcc)))
 
-F_e = ufl.variable(F * ufl.inv(F_g))
+F_e = F * ufl.inv(F_g)
 
-breakpoint()
-E = 1/2*(F_e.T*F_e - I)                                 # Green-Lagrange tensor (difference tensor)
+E = 1/2*(F_e.T*F_e - I)    # Green-Lagrange tensor (difference tensor)
 
 '''Strain Energy Density Function'''
 Q = b_f*E[0, 0]**2 + b_t*(E[1, 1]**2 + E[2, 2]**2 + 2*E[1, 2]*E[2, 1]) + b_fr*(2*E[0, 1]*E[1, 0] + 2*E[0, 2]*E[2, 0])
@@ -157,35 +138,25 @@ E_cross = ufl.as_tensor(((E[1, 1], E[1, 2]), (E[2, 1], E[2, 2])))
 
 '''STRAIN TENSORS'''
 
-J = ufl.det(F_e)                                      # Determinant of deformation tensor
-C = pow(J, -float(2 / 3)) * F_e.T * F_e                 # Cauchy-Green tensor (ratio tensor)
+J = ufl.det(F_e)             # Determinant of deformation tensor
+C = pow(J, -float(2 / 3)) * F_e.T * F_e       # Cauchy-Green tensor (ratio tensor)
 
 W_pas = 1/2*C_pas*(ufl.exp(Q - 1))
 W_comp = 1/2*C_comp*(J - 1)*ufl.ln(J)
 
 W = W_pas + W_comp
 
-P = (ufl.diff(W, F_e) + p * J * ufl.inv(F_e.T))
+P = ufl.diff(W, F)
 
 weakP = ufl.inner(P, ufl.grad(v)) * dx 
-weakPres = q * (J - 1) * dx
 
 '''SOLVE PDE's'''
 
+boundaryConditions = define_bcs(V, mesh)
 
+weak_form = weakP
 
-# time2 = 0.5*np.ones(50)
-# time  = np.concatenate((time1, time2))
-
-boundaryConditions = define_bcs(mixedSpace, mesh)
-
-# E = 1/2*(F.T*F - I)
-
-prevF = ufl.Identity(3)
-
-weak_form = weakP + weakPres
-
-problem = dolfinx.fem.petsc.NonlinearProblem(weak_form, functions, boundaryConditions)
+problem = dolfinx.fem.petsc.NonlinearProblem(weak_form, u, boundaryConditions)
 solver = dolfinx.nls.petsc.NewtonSolver(mesh.comm, problem)
 
 solver.rtol = 1e-4
@@ -203,19 +174,23 @@ filename.with_suffix(".h5").unlink(missing_ok=True)
 fout = dolfinx.io.XDMFFile(mesh.comm, filename, "w")
 fout.write_mesh(mesh)
 
-for i in range(1000):
-    if (i+1) % 400 == 0:
-        asd = toDebug(prevF_g)
-        print(f"Growth k_ff: {asd.x.array}; step {i+1}")
-        # print(f"Growth k_cc: {k_cc}; step {i+1}")
-    # prevF *= F_g(a,\ F_lambda(u))
-    solver.solve(functions)
 
-    prevF_g *= F_g
-    k_ff = 1 / (1 + ufl.exp(f_lengthslope*(prevF_g[0,0] - F_ff50)))
-    k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(prevF_g[1,1] - F_cc50)))
 
-    u, _ = functions.split()
+for i in range(10):
+
+    print(eval_expression(k_ff, [0.5, 0.5, 0.5]))
+    print(eval_expression(k_cc, [0.5, 0.5, 0.5]))
+
+    solver.solve(u)
+
+    s_l.value = i 
+    s_t.value = i
+
+    # prevF_g *= F_g
+
+    # k_ff = 1 / (1 + ufl.exp(f_lengthslope*(prevF_g[0,0] - F_ff50)))
+    # k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(prevF_g[1,1] - F_cc50)))
+
     u1.interpolate(u)
     fout.write_function(u1, i)
 
