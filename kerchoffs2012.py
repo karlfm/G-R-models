@@ -5,7 +5,7 @@ import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
 from pathlib import Path
-
+import cardiac_geometries
 
 '''TODO: REMOVE THIS'''
 
@@ -47,9 +47,9 @@ def define_bcs(V, mesh):
 
 '''CREATE MESH/FUNCTION SPACE'''
 
-mesh = dolfinx.mesh.create_unit_cube(MPI.COMM_WORLD, 2, 2, 2)
+mesh = dolfinx.mesh.create_unit_cube(MPI.COMM_WORLD, 1, 1, 1)
 
-P2 = ufl.VectorElement("Lagrange", mesh.ufl_cell(), 2)
+P2 = ufl.VectorElement("Lagrange", mesh.ufl_cell(), 3)
 
 V = dolfinx.fem.FunctionSpace(mesh, P2)
 
@@ -80,7 +80,27 @@ def eval_expression(expr, point):
         d_expr = dolfinx.fem.Expression(expr, ref_x, comm=MPI.COMM_SELF)
         values = d_expr.eval(mesh, np.asarray(cells).astype(np.int32))
         return values
+    
+setPoint = -2
 
+def sl(expr, points):
+    maxVal = 0
+    for point in points:
+        currentPoint = eval_expression(expr, point)
+        if currentPoint[0][0] > maxVal:
+            maxVal = currentPoint[0][0]
+    return maxVal - setPoint
+
+def st(expr, points):
+    minVal = 0
+    for point in points:
+        currentPoint = eval_expression(expr, point)
+        mini = max(
+            [currentPoint[0][4], currentPoint[0][5], currentPoint[0][7], currentPoint[0][8]]
+            )
+        if mini < minVal:
+            minVal = mini
+    return minVal - setPoint
 
 '''CONSTANTS'''
 C_pas = 0.44
@@ -107,32 +127,43 @@ I = ufl.Identity(3)                                 # Identity tensor
 F = ufl.variable(I + ufl.grad(u))                   # Deformation tensor
 currentF = F
 
-s_l = dolfinx.fem.Constant(mesh, 0.0)
-s_t = dolfinx.fem.Constant(mesh, 0.0)
+breakpoint()
+V_f = dolfinx.fem.FunctionSpace(mesh, ufl.TensorElement("DG", mesh.ufl_cell(), 0))
+F_gff_cum = dolfinx.fem.Function(V_f)
+F_gcc_cum = dolfinx.fem.Function(V_f)
+F_gff_cum.x.array[:] = 1
+F_gcc_cum.x.array[:] = 1
 
-prevF_g = F
+k_ff = 1 / (1 + ufl.exp(f_lengthslope*(currentF[0,0] - F_ff50)))
+k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(currentF[1,1] - F_cc50)))
 
-k_ff = 1 / (1 + ufl.exp(f_lengthslope*(prevF_g[0,0] - F_ff50)))
-k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(prevF_g[1,1] - F_cc50)))
+F_gff = ufl.conditional(
+    ufl.ge(sl(F, mesh.geometry.x),0),
+    k_ff*f_ffmax/(1 + ufl.exp(-f_f*(sl(F_gff_cum, mesh.geometry.x) - s_l50))) + 1,
+    -f_ffmax/(1 + ufl.exp(f_f*(sl(F_gff_cum, mesh.geometry.x) + s_l50))) + 1)
 
-F_gff = ufl.conditional(ufl.ge(s_l,0),
-                        k_ff*f_ffmax/(1 + ufl.exp(-f_f*(s_l - s_l50))) + 1,
-                        -f_ffmax/(1 + ufl.exp(f_f*(s_l + s_l50))) + 1)
+F_gcc = ufl.conditional(
+    ufl.ge(st(F_gcc_cum, mesh.geometry.x),0), 
+    ufl.sqrt(k_cc*f_ccmax/(1 + ufl.exp(-c_f*(st(F_gcc_cum, mesh.geometry.x) - s_t50))) + 1), 
+    ufl.sqrt(-f_ccmax/(1 + ufl.exp(c_f*(st(F_gcc_cum, mesh.geometry.x) - s_t50))) + 1))
 
-F_gcc = ufl.conditional(ufl.ge(s_t,0), 
-                        ufl.sqrt(k_cc*f_ccmax/(1 + ufl.exp(-c_f*(s_t - s_t50))) + 1), 
-                        ufl.sqrt(-f_ccmax/(1 + ufl.exp(c_f*(s_t - s_t50))) + 1))
-
-F_g = ufl.as_tensor(((F_gff, 0, 0),
-                     (0, F_gcc, 0),
-                     (0, 0, F_gcc)))
+F_g = ufl.as_tensor((
+    (F_gff, 0, 0),
+    (0, F_gcc, 0),
+    (0, 0, F_gcc)))
 
 F_e = F * ufl.inv(F_g)
+
+newE = lambda F : 1/2*(F.T*F - I)
 
 E = 1/2*(F_e.T*F_e - I)    # Green-Lagrange tensor (difference tensor)
 
 '''Strain Energy Density Function'''
-Q = b_f*E[0, 0]**2 + b_t*(E[1, 1]**2 + E[2, 2]**2 + 2*E[1, 2]*E[2, 1]) + b_fr*(2*E[0, 1]*E[1, 0] + 2*E[0, 2]*E[2, 0])
+Q = (
+    b_f*E[0, 0]**2 
+    + b_t*(E[1, 1]**2 + E[2, 2]**2 + 2*E[1, 2]*E[2, 1]) 
+    + b_fr*(2*E[0, 1]*E[1, 0] + 2*E[0, 2]*E[2, 0])
+)
 
 E_cross = ufl.as_tensor(((E[1, 1], E[1, 2]), (E[2, 1], E[2, 2])))
 
@@ -174,22 +205,22 @@ filename.with_suffix(".h5").unlink(missing_ok=True)
 fout = dolfinx.io.XDMFFile(mesh.comm, filename, "w")
 fout.write_mesh(mesh)
 
+for i in np.arange(0, 0.2, 0.01):
 
-
-for i in range(10):
-
-    print(eval_expression(k_ff, [0.5, 0.5, 0.5]))
-    print(eval_expression(k_cc, [0.5, 0.5, 0.5]))
+    # print(eval_expression(F_gff, [0.5, 0.5, 0.5]))
+    # print(eval_expression(F_gcc, [0.5, 0.5, 0.5]))
+    if (i+1) % 10 == 0:
+        # print(sl(F_gff_cum, mesh.geometry.x))
+        # print(st(F_gcc_cum, mesh.geometry.x))
+        print(eval_expression(F_g, [0.5, 0.5, 0.5]))
+    
+    print(st(F_gcc_cum, mesh.geometry.x))
+    print(st(F_gff_cum, mesh.geometry.x))
 
     solver.solve(u)
 
-    s_l.value = i 
-    s_t.value = i
-
-    # prevF_g *= F_g
-
-    # k_ff = 1 / (1 + ufl.exp(f_lengthslope*(prevF_g[0,0] - F_ff50)))
-    # k_cc = 1 / (1 + ufl.exp(c_thicknessslope*(prevF_g[1,1] - F_cc50)))
+    F_gff_cum *= F_gff
+    F_gcc_cum *= F_gcc
 
     u1.interpolate(u)
     fout.write_function(u1, i)
