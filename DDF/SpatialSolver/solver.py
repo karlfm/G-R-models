@@ -29,11 +29,11 @@ def eval_expression(expr, point, mesh):
         values = d_expr.eval(mesh, np.asarray(cells).astype(np.int32))
         return values
 
-def set_boundary_types(mesh, boundary_type):
+def set_boundary_types(mesh, boundary_type, X):
     # boundary_conditions is a list of pairs of ints containing boundary conditions for each dimension
     boundary_conditions_dolfin = []
     flattened_boundaries = []
-    boundaries = geo.get_boundary_nodes(mesh)
+    boundaries = geo.get_boundary_nodes(mesh, X)
 
     dimension = mesh.topology.dim
     boundary_dimension = dimension - 1
@@ -57,9 +57,6 @@ def set_boundary_types(mesh, boundary_type):
 def apply_boundary_conditions(mesh, facet_tags, values, P, function_space, v):
     # v is a test function
     # values is a list of pairs (type, lambda) that take in coordinates and return values?
-    #facet_tags = set_boundary_types(mesh, boundary_type)
-    #print(id(facet_tags))
-    #function_space, u, v = get_functions(mesh)
     dx, ds, dS = get_measures(mesh, facet_tags)
     no_bc, dirichlet, neumann, robin = 0, 1, 2, 3
 
@@ -76,8 +73,8 @@ def apply_boundary_conditions(mesh, facet_tags, values, P, function_space, v):
             dirichlet_boundary_condition = df.fem.dirichletbc(boundary_u, dofs)
             boundary_conditions.append(dirichlet_boundary_condition)
         elif bc_type == neumann:
-            P += ufl.dot(func, v) *  ds(bc_type)
-            # P -= ufl.inner(func, v) *  ds(bc_type)
+            # P += ufl.dot(func, v) *  ds(bc_type)
+            P -= ufl.inner(func, v) *  ds(bc_type)
 
     return P, boundary_conditions
     # for neumann bcs
@@ -95,12 +92,12 @@ def get_measures(mesh, facet_tags):
     # quadrature_degree tells the computer how many and where to evaluate the points
     # 
     # "dx" tells the computer to integrate over the entire cell
-    dx = ufl.Measure("dx", domain=mesh, metadata={"quadrature_degree": 4})
+    dx = ufl.Measure("dx", domain=mesh)#, metadata={"quadrature_degree": 4})
     # "ds" tells the computer to integrate over the exterior boundary
     ds = ufl.Measure("ds", domain=mesh, subdomain_data=facet_tags)
                      #, metadata={"quadrature_degree": 4})
     # "dS" tells the computer to integrate over the interior boundary
-    dS = ufl.Measure("dS", domain=mesh, metadata={"quadrature_degree": 4})
+    dS = ufl.Measure("dS", domain=mesh)#, metadata={"quadrature_degree": 4})
     return dx, ds, dS
 
 def get_basic_tensors(u):
