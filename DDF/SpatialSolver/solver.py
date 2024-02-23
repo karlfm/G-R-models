@@ -54,16 +54,19 @@ def set_boundary_types(mesh, boundary_type, X):
 
     return facet_tags
 
-def apply_boundary_conditions(mesh, facet_tags, values, P, function_space, v):
+def apply_boundary_conditions(mesh, values, P, function_space, v, X):
     # v is a test function
     # values is a list of pairs (type, lambda) that take in coordinates and return values?
+    boundary_type = [(values[i][0], values[i + 1][0]) for i in range(0, len(values), 2)]
+    facet_tags = set_boundary_types(mesh, boundary_type, X)
     dx, ds, dS = get_measures(mesh, facet_tags)
     no_bc, dirichlet, neumann, robin = 0, 1, 2, 3
 
     boundary_conditions = []
     dimension = mesh.topology.dim
     boundary_dimension = dimension - 1
-    for bc_type, func in values:
+    for value in values:
+        bc_type, func = value
         # for dirichelt bcs
         if bc_type == dirichlet:
             boundary_u = df.fem.Function(function_space)

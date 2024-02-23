@@ -30,6 +30,17 @@ def von_mis(F_e):
     )
     return von_Mises
 
+
+class bc:
+    def __init__(self, bc_type, bc_condition):
+        self.bc_type = bc_type
+        self.bc_condition = bc_condition
+    
+    def info(self):
+        return (self.bc_type, self.bc_condition)
+
+
+'''Create Geometry'''
 x_min, x_max, Nx = 0, 1, 16
 y_min, y_max, Ny = 0, 1, 8
 z_min, z_max, Nz = 0, 1, 8
@@ -39,116 +50,106 @@ zs = np.linspace(z_min, z_max, Nz)
 X = [xs, ys, zs]
 mesh = geo.create_box(X)
 
+
+'''Get Functions'''
 function_space, u, v = solv.get_functions(mesh)
 
 
-
-no_bc, dirichlet, neumann, robin = 0, 1, 2, 3
-
+'''Create And Set Boundary Conditions'''
 dirichlet_condition = lambda x : [x[0]*0, x[1]*0, x[2]*0]
-x = ufl.SpatialCoordinate(mesh)
-n = ufl.FacetNormal(mesh)   
 neumann_condition = df.fem.Constant(mesh, df.default_scalar_type((0, 0, 50)))
-boundary_types = [
-    (dirichlet, dirichlet), 
-    (no_bc, no_bc), 
-    (no_bc, no_bc)
-    ]
+no_bc, dirichlet, neumann, robin = 0, 1, 2, 3
+x_left  = bc(dirichlet, lambda x : [x[0]*0, x[1]*0, x[2]*0])
+x_right = bc(dirichlet, lambda x : [x[0]*1, x[1]*0, x[2]*0])
+y_left  = bc(no_bc, 0)
+y_right = bc(no_bc, 0)
+z_left  = bc(no_bc, 0)
+z_right = bc(no_bc, 0)
 
 bc_values = [
-    (dirichlet, lambda x : [x[0]*0, x[1]*0, x[2]*0]), (dirichlet, lambda x : [x[0]*1, x[1]*0, x[2]*0]),     # x-axis boundary type and value
-    (no_bc, 0), (no_bc, 0),   # y-axis boundary type and value 
-    (no_bc, 0), (no_bc, 0)    # z-axis boundary type and value
+    (x_left.info()), (x_right.info()),   # x-axis boundary type and value
+    (y_left.info()), (y_right.info()),   # y-axis boundary type and value 
+    (z_left.info()), (z_right.info())    # z-axis boundary type and value
     ]
 
-facet_tags = solv.set_boundary_types(mesh, boundary_types, X)
-# lambdaF = lambda u : ufl.variable(I + ufl.grad(u))             # Deformation tensor
-# F = lambdaF(u)
 
-# Elasticity parameters
+'''Create Stress Tensor'''
+# V = df.fem.functionspace(mesh, ("Lagrange", 1, (mesh.geometry.dim, )))
 
+# Q = df.fem.FiniteElement(mesh, ("Quadrature", 4, (3,3)))
+Q = ufl.FiniteElement("Quadrature", mesh.ufl_cell(), 4, (3,3))
+q = df.fem.FunctionSpace(mesh, Q)
+F_g = df.fem.Function(q)
 
-
-
-# Strain energy function
 t = df.fem.Constant(mesh, df.default_scalar_type(0))
 F_g = ufl.as_tensor(((1+t, 0, 0), (0, 1, 0), (0, 0, 1)))
 invF_G = ufl.inv(F_g)
-#F_e = ufl.variable(ufl.dot(F))
-I = ufl.Identity(len(u))                      # Identity tensor
-F = ufl.variable(I + ufl.grad(u))
-F_e = F*invF_G                                  # Deformation tensor
-# F_e = F
-E = 1/2*(F_e.T*F_e - I)                           # Curvature tensor / difference tensor
+
+I = ufl.Identity(len(u))                        # Identity tensor
+F = ufl.variable(I + ufl.grad(u))               # Deformation tensor
+F_e = ufl.variable(F*invF_G)                    # Elasticity tensor
+E = 1/2*(F_e.T*F_e - I)                         # Curvature tensor / difference tensor
+
+# E_expr = df.fem.Expression(E, q.element.interpolation_points())
+
+#t.interpolate(E)
+
+
 J = ufl.det(F_e)                                # Determinant
-C = ufl.variable(F_e.T * F_e)                     # Metric tensor / ratio tensor
-Ic = ufl.variable(ufl.tr(C))                  # First invariant
+C = ufl.variable(F_e.T * F_e)                   # Metric tensor / ratio tensor
+
+Ic = ufl.variable(ufl.tr(C))                    # First invariant
+
 El = df.default_scalar_type(1.0e4)
 nu = df.default_scalar_type(0.3)
 mu = df.fem.Constant(mesh, El / (2 * (1 + nu)))
 lmbda = df.fem.Constant(mesh, El * nu / ((1 + nu) * (1 - 2 * nu)))
 
 psi = (mu / 2) * (Ic - 3) - mu * ufl.ln(J) + (lmbda / 2) * (ufl.ln(J))**2
-P = ufl.diff(psi, F)
+P = ufl.diff(psi, F_e)
 sigma = ufl.inner(ufl.grad(v), P) * ufl.dx 
-P_with_bcs, bcs = solv.apply_boundary_conditions(mesh, facet_tags, bc_values, sigma, function_space, v)
+
+
+'''Apply Boundary Conditions And Set Up Solver'''
+P_with_bcs, bcs = solv.apply_boundary_conditions(mesh, bc_values, sigma, function_space, v, X)
 problem = NonlinearProblem(P_with_bcs, u, bcs)
 solver = NewtonSolver(mesh.comm, problem)
 
-solver.solve(u)
 
-
-solver = NewtonSolver(mesh.comm, problem)
-solver.solve(u)
+'''Solve The Problem'''
 us = []
-for i in np.linspace(0, 1, 10, endpoint=True):
+for i in np.linspace(0, 1, 8, endpoint=True):
     print(i)
-    t.value = i
-    print(solv.eval_expression(F_e, [0.5, 0.5, 0.5], mesh))
-    # F_e = F*ufl.inv(F_g(t))
+
     solver.solve(u)
+    localE = solv.eval_expression(E, [0.5, 0.5, 0.5], mesh)
+    print(solv.eval_expression(E, [0.5, 0.5, 0.5], mesh))
+    
+    t.value = i
+
+    #F_g += E
+    # F_g.interpolate(E_expr)
     u_new = u.copy() 
     us.append(u_new)
-    # F = F_e*F_g(t)
-    # F_e = F*ufl.inv(F_g(t))
-
-# '''STRAIN TENSORS'''
-
-# Set Newton solver options
-
-# F_e = (lambdaF(u))
-
-# breakpoint()
-# for t in np.linspace(0, 0.5, 1, endpoint=True):
-#     print("t = ", t)
-#     # F_e = ufl.variable(F*ufl.inv(F_g(t)))
-
-#     P = ufl.diff(psi, F_e)
-#     breakpoint()
-#     # P = ufl.diff(psi, F)
-
-#     sigma = ufl.inner(ufl.grad(v), P) * ufl.dx     
-#     P_with_bcs, bcs = solv.apply_boundary_conditions(mesh, facet_tags, bc_values, sigma, function_space, v)
-#     problem = NonlinearProblem(P_with_bcs, u, bcs)
-#     solver = NewtonSolver(mesh.comm, problem)
-#     solver.solve(u)
-#     u_new = u.copy()  
-#     F_e_old = F_e 
-#     #vms.append(von_mis(F_e_old)) 
-#     us.append(u_new)
-#     F = F_e*F_g(t)
 
 
-#################################################################################
+
+
+
+
+
+
+
+##################################################################################################################
 
 ### WHAT DOES THIS DO?
 mesh.topology.create_connectivity(
     mesh.topology.dim-1, mesh.topology.dim
     )
 
-with XDMFFile(mesh.comm, "Hookean_facet_tags.xdmf", "w") as xdmf:
-    xdmf.write_mesh(mesh)
-    xdmf.write_meshtags(facet_tags, mesh.geometry)
+# with XDMFFile(mesh.comm, "Hookean_facet_tags.xdmf", "w") as xdmf:
+#     xdmf.write_mesh(mesh)
+#     xdmf.write_meshtags(facet_tags, mesh.geometry)
 
 # Not really sure about this
 AA = ufl.VectorElement("Lagrange", mesh.ufl_cell(), 1)
@@ -160,9 +161,6 @@ filenameStress.unlink(missing_ok=True)
 filenameStress.with_suffix(".h5").unlink(missing_ok=True)
 foutStress = df.io.XDMFFile(mesh.comm, filenameStress, "w")
 foutStress.write_mesh(mesh)
-
-
-
 
 pp.write_to_paraview("NeuHookeanDisplacement.xdmf", mesh, us)
 #pp.write_vm_to_paraview("VonMissesStress.xdmf", mesh, vms)
