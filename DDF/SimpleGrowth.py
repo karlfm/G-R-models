@@ -11,6 +11,7 @@ import basix
 
 sys.path.insert(1, '/MyProject/MyCode/DDF/Geometry')
 sys.path.insert(1, '/MyProject/MyCode/DDF/SpatialSolver')
+sys.path.insert(1, '/MyProject/MyCode/DDF/PostProcessing')
 
 import geometry as geo
 import solver as solv 
