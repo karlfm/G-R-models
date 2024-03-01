@@ -3,13 +3,14 @@ import ufl
 import dolfinx as df
 import sys
 from mpi4py import MPI
+import basix
 
 
 sys.path.insert(1, '/MyProject/MyCode/DDF/Geometry')
 
 import geometry as geo
 
-def eval_expression(expr, point, mesh):
+def eval_expression(expr, mesh, point = [0.5, 0.5, 0.5]):
     # Determine what process owns a point and what cells it lies within
     _, _, owning_points, cells = df.cpp.geometry.determine_point_ownership(
         mesh._cpp_object, point, 1e-6)
@@ -90,6 +91,38 @@ def get_functions(mesh):
 
     return V, u, v
 
+def to_scalar_map(f, mesh):
+    # You have to interpolate the function like function.interpolate(expression)
+    scalar_field = df.fem.FunctionSpace(mesh, ("Lagrange", 1, (1, )))
+    expression = df.fem.Expression(f, scalar_field.element.interpolation_points())
+    function = df.fem.Function(scalar_field)
+    return function, expression
+
+def to_tensor_map(f, mesh):
+    # You have to interpolate the function like function.interpolate(expression)
+    tensor_field = df.fem.FunctionSpace(mesh, ufl.TensorElement("DG", mesh.ufl_cell(), 0, shape=(3,3)))
+    expression = df.fem.Expression(f, tensor_field.element.interpolation_points())
+    function = df.fem.Function(tensor_field)
+    return function, expression
+
+def interpolate_quadrature(ufl_expr, mesh):
+
+    We = ufl.FiniteElement("Quadrature", mesh.ufl_cell(), degree = mesh.geometry.dim, quad_scheme = "default")
+
+    W  = df.fem.FunctionSpace(mesh, We)
+
+    new_stress = df.fem.Function(W)
+
+    basix_celltype = getattr(basix.CellType, mesh.topology.cell_types[0].name)
+    quadrature_points, weights = basix.make_quadrature(basix_celltype,1)
+
+    map_c = mesh.topology.index_map(mesh.topology.dim)
+    num_cells = map_c.size_local + map_c.num_ghosts
+    cells = np.arange(0, num_cells, dtype=np.int32)
+
+    expr_expr = df.fem.Expression(ufl_expr, quadrature_points)
+    expr_eval = expr_expr.eval(mesh, cells)
+    return np.mean(expr_eval, axis=0)
 
 def get_measures(mesh, facet_tags):
     # quadrature_degree tells the computer how many and where to evaluate the points
@@ -142,7 +175,7 @@ def solver(F, u, bcs):
 
 
 def main():
-    dx, ds, dS = get_measures()
+    return
 
 if __name__ == "__main__":
     main()

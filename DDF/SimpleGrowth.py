@@ -28,8 +28,8 @@ class bc:
 
 '''Create Geometry'''
 x_min, x_max, Nx = 0, 1, 4
-y_min, y_max, Ny = 0, 1, 2
-z_min, z_max, Nz = 0, 1, 2
+y_min, y_max, Ny = 0, 1, 16
+z_min, z_max, Nz = 0, 1, 16
 xs = np.linspace(x_min, x_max, Nx)
 ys = np.linspace(y_min, y_max, Ny)
 zs = np.linspace(z_min, z_max, Nz)
@@ -59,17 +59,13 @@ bc_values = [
     ]
 #endregion
 
-V_aux = df.fem.FunctionSpace(mesh, ("DG", 1))
+infinitesimal_strain = 1/2*(ufl.grad(u).T * ufl.grad(u) - ufl.Identity(len(u)))
+strain_function, strain_expression = solv.to_tensor_map(infinitesimal_strain, mesh)
 
-driver = df.fem.Function(function_space)
-get_x = u
-expr = df.fem.Expression(get_x, function_space.element.interpolation_points())
-
-# max_infinitesimal_strain_expr = df.fem.Expression(max_infinitesimal_strain, V_aux.element.interpolation_points())
 F_g = ufl.as_tensor((
-    (1 + driver[0], 0, 0),
-    (0, 1 + driver[1], 0),
-    (0, 0, 1 + driver[2])))
+    (1 + strain_function[0, 0], 0, 0),
+    (0, 1, 0),
+    (0, 0, 1)))
 
 '''Create Stress Tensor'''
 invF_G = ufl.inv(F_g)
@@ -89,9 +85,16 @@ nu = df.default_scalar_type(0.3)
 mu = df.fem.Constant(mesh, El / (2 * (1 + nu)))
 lmbda = df.fem.Constant(mesh, El * nu / ((1 + nu) * (1 - 2 * nu)))
 
+#Compressible Neo-Hookean
 psi = (mu / 2) * (Ic - 3) - mu * ufl.ln(J) + (lmbda / 2) * (ufl.ln(J))**2
 P = ufl.diff(psi, F_e)
 sigma = ufl.inner(ufl.grad(v), P) * ufl.dx 
+
+von_Mises = ufl.sqrt(
+        (P[0, 0] - P[1, 1])**2 + (P[1, 1] - P[2, 2])**2 + 
+        (P[2, 2] - P[0, 0])**2 + 6*(P[0, 1]**2 + P[1, 2]**2 + P[2, 0]**2)
+    )
+function, expression = solv.to_scalar_map(von_Mises, mesh)
 
 '''Apply Boundary Conditions And Set Up Solver'''
 P_with_bcs, bcs = solv.apply_boundary_conditions(mesh, bc_values, sigma, function_space, v, X)
@@ -101,16 +104,22 @@ solver = NewtonSolver(mesh.comm, problem)
 solver.solve(u)
 
 us = []
+von_Mises_stresses = []
 u_new = u.copy()
 us.append(u_new)
 
 '''Solve The Problem'''
-for i in np.arange(32):
+for i in np.arange(16):
     print(i)
-    driver.interpolate(expr)
+    strain_function.interpolate(strain_expression)
+    function.interpolate(expression)
     solver.solve(u)
+
     u_new = u.copy()
     us.append(u_new)
+    von_Mises = function.copy()
+    print(solv.eval_expression(strain_function, mesh))
+    von_Mises_stresses.append(von_Mises)
 
 ### WHAT DOES THIS DO?
 mesh.topology.create_connectivity(
@@ -133,4 +142,4 @@ foutStress = df.io.XDMFFile(mesh.comm, filenameStress, "w")
 foutStress.write_mesh(mesh)
 
 pp.write_to_paraview("SimpleGrowth.xdmf", mesh, us)
-#pp.write_vm_to_paraview("VonMissesStress.xdmf", mesh, vms)
+pp.write_vm_to_paraview("VonMissesStress.xdmf", mesh, von_Mises_stresses)
