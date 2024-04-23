@@ -3,55 +3,10 @@ import ufl
 from dolfinx.io import XDMFFile
 from pathlib import Path
 
-# with XDMFFile(mesh.comm, "Hookean_facet_tags.xdmf", "w") as xdmf:
-#     xdmf.write_mesh(mesh)
-#     xdmf.write_meshtags(facet_tags, mesh.geometry)
+def write_scalar_to_paraview(filename, mesh, scalars):
 
-# "myHookeanDisplacement.xdmf"
-
-
-
-def write_to_paraview(filename, mesh, us):
-
-    # Not really sure about this
-    AA = ufl.VectorElement("Lagrange", mesh.ufl_cell(), 1)
-    BB = df.fem.FunctionSpace(mesh, AA)
-    u1 = df.fem.Function(BB)
-
-    filename = Path(filename)
-    filename.unlink(missing_ok=True)
-    filename.with_suffix(".h5").unlink(missing_ok=True)
-    fout = df.io.XDMFFile(mesh.comm, filename, "w")
-    fout.write_mesh(mesh)
-
-    for i, u in enumerate(us):
-        u1.interpolate(u)
-        fout.write_function(u1, i)
-
-def write_tensor_to_paraview(filename, mesh, us):
-    # Not really sure about this
-    AA = ufl.TensorElement("DQ", mesh.ufl_cell(), 0)
-    BB = df.fem.FunctionSpace(mesh, AA)
-    u1 = df.fem.Function(BB)
-
-    filename = Path(filename)
-    filename.unlink(missing_ok=True)
-    filename.with_suffix(".h5").unlink(missing_ok=True)
-    fout = df.io.XDMFFile(mesh.comm, filename, "w")
-    fout.write_mesh(mesh)
-
-    for i, u in enumerate(us):
-        u1.interpolate(u)
-        fout.write_function(u1, i)
-
-def write_vm_to_paraview(filename, mesh, vms):
-
-    # Not really sure about this
-    # V_von_mises = df.fem.FunctionSpace(mesh, ("DG", 0))
-    # stresses = df.fem.Function(V_von_mises)
-
-    scalar_field = df.fem.functionspace(mesh, ("Lagrange", 1, (1, )))
-    stresses = df.fem.Function(scalar_field)
+    function_space = df.fem.functionspace(mesh, ("Lagrange", 1))#, (1,  )
+    function = df.fem.Function(function_space)
 
     filename = Path(filename)
     filename.unlink(missing_ok=True)
@@ -59,8 +14,39 @@ def write_vm_to_paraview(filename, mesh, vms):
     foutStress = df.io.XDMFFile(mesh.comm, filename, "w")
     foutStress.write_mesh(mesh)
 
-    for i, vm in enumerate(vms):
-        print(i)
-        stress_expr = df.fem.Expression(vm, scalar_field.element.interpolation_points())
-        stresses.interpolate(stress_expr)
-        foutStress.write_function(stresses, i)
+    for i, scalar in enumerate(scalars):
+        stress_expr = df.fem.Expression(scalar, function_space.element.interpolation_points())
+        function.interpolate(stress_expr)
+        foutStress.write_function(function, i)
+    
+def write_vector_to_paraview(filename, mesh, us):
+
+    vector_element = ufl.VectorElement("Lagrange", mesh.ufl_cell(), 1)
+    function_space = df.fem.FunctionSpace(mesh, vector_element)
+    function = df.fem.Function(function_space)
+
+    filename = Path(filename)
+    filename.unlink(missing_ok=True)
+    filename.with_suffix(".h5").unlink(missing_ok=True)
+    fout = df.io.XDMFFile(mesh.comm, filename, "w")
+    fout.write_mesh(mesh)
+
+    for i, u in enumerate(us):
+        function.interpolate(u)
+        fout.write_function(function, i)
+
+def write_tensor_to_paraview(filename, mesh, tensors):
+
+    tensor_element = ufl.TensorElement("DG", mesh.ufl_cell(), 0)
+    function_space = df.fem.FunctionSpace(mesh, tensor_element)
+    function = df.fem.Function(function_space)
+
+    filename = Path(filename)
+    filename.unlink(missing_ok=True)
+    filename.with_suffix(".h5").unlink(missing_ok=True)
+    fout = df.io.XDMFFile(mesh.comm, filename, "w")
+    fout.write_mesh(mesh)
+   
+    for i, tensor in enumerate(tensors):
+        function.interpolate(tensor)
+        fout.write_function(function, i)

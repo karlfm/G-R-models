@@ -13,28 +13,16 @@ import basix
 sys.path.insert(1, '/MyProject/MyCode/DDF/helper')
 
 import geometry as geo
-import solver as solv 
+import ddf as ddf 
 import postprocessing as pp
+import hyperelastic_models as psi
 import simple_model
 
-class BC(Enum):
-    dirichlet = 1
-    neumann = 2
-
-
 #region
-class bc:
-    def __init__(self, bc_type, bc_condition):
-        self.bc_type = bc_type
-        self.bc_condition = bc_condition
-    
-    def info(self):
-        return (self.bc_type, self.bc_condition)
-
 '''Create Geometry'''
-x_min, x_max, Nx = 0, 1, 5
-y_min, y_max, Ny = 0, 1, 5
-z_min, z_max, Nz = 0, 1, 5
+x_min, x_max, Nx = 0, 1, 6
+y_min, y_max, Ny = 0, 1, 6
+z_min, z_max, Nz = 0, 1, 6
 xs = np.linspace(x_min, x_max, Nx)
 ys = np.linspace(y_min, y_max, Ny)
 zs = np.linspace(z_min, z_max, Nz)
@@ -42,112 +30,148 @@ X = [xs, ys, zs]
 mesh = geo.create_box(X)
 
 '''Get Functions'''
-function_space, u, v = solv.get_functions(mesh)
+function_space, u, v = ddf.get_functions(mesh)
 # state_space, state, u, p, v, q = solv.get_mixed_functions(mesh)
 # function_space, _, _ = solv.get_functions(mesh)
-grad_u_func, grad_u_expression = solv.to_tensor_map(ufl.grad(u), mesh)
+grad_u_func, grad_u_expression = ddf.to_tensor_map(ufl.grad(u), mesh)
 
-'''Create And Set Boundary Conditions'''
-dirichlet_condition = lambda x : [x[0]*0, x[1]*0, x[2]*0]
-no_bc, dirichlet, neumann, robin = 0, 1, 2, 3
-x_left  = bc(dirichlet, lambda x : [x[0]*0, x[1]*0, x[2]*0])
-x_right = bc(dirichlet, lambda x : [x[0]*1, x[1]*0, x[2]*0])
-y_left  = bc(no_bc, 0)
-y_right = bc(no_bc, 0)
-z_left  = bc(no_bc, 0)
-z_right = bc(no_bc, 0)
+dirichlet_bc = []
+x_left  = (lambda x : np.isclose(x[0], x_min), 0, df.default_scalar_type(0))
+x_right = (lambda x : np.isclose(x[0], x_max), 0, df.default_scalar_type(1))
+y_left  = (lambda x : np.isclose(x[1], y_min), 1, df.default_scalar_type(0))
+z_left  = (lambda x : np.isclose(x[2], z_min), 2, df.default_scalar_type(0))
 
-bc_values = [
-    (x_left.info()), (x_right.info()),   # x-axis boundary type and value
-    (y_left.info()), (y_right.info()),   # y-axis boundary type and value 
-    (z_left.info()), (z_right.info())    # z-axis boundary type and value
-    ]
-#endregion
-
+bc_values = [x_left, x_right, y_left, z_left]
+#bc_values  = [x_right]
 '''Create Stress Tensor'''
+infinitesimal_strain = 1/2*(ufl.grad(u).T * ufl.grad(u))
+strain_function, strain_expression = ddf.to_tensor_map(infinitesimal_strain, mesh)
+strain_function_00, strain_expression_00 = ddf.to_scalar_map(infinitesimal_strain[0, 0], mesh)
 
-infinitesimal_strain = 1/2*(ufl.grad(u).T * ufl.grad(u) - ufl.Identity(len(u)))
-# infinitesimal_strain = 1/2*(ufl.grad(u).T * ufl.grad(u) + ufl.grad(u).T + ufl.grad(u))
-strain_function, strain_expression = solv.to_tensor_map(infinitesimal_strain, mesh)
-strain_function_00, strain_expression_00 = solv.to_scalar_map(infinitesimal_strain[0, 0], mesh)
-strain_function_11, strain_expression_11 = solv.to_scalar_map(infinitesimal_strain[1, 1], mesh)
 
 '''From the paper'''
-#region
-'''CONSTANTS'''
-# Eff_set = 0.001
-Eff_set = 0.1
-Ecross_set = 0.5
+V = df.fem.FunctionSpace(mesh, ("Discontinuous Lagrange", 0))
+eff = df.fem.Function(V)
+F_g = simple_model.F_g(strain_function)
+F_g_function, F_g_expression = ddf.to_tensor_map(F_g, mesh)
+F_g_expression_old = F_g_expression
 
-previous_F_gff = 1
-previous_F_gcc = 1
-s_l = max(strain_function_00) - Eff_set             # Equation 5
-s_t = min(strain_function_00) - Ecross_set       # Equation 5
-
-driver_function, driver_expression = simple_model.driver(u, mesh)
-driver_function.interpolate(driver_expression)
-F_g = simple_model.F_g(mesh, driver_function)
 invF_g = ufl.inv(F_g)
 
 I = ufl.Identity(len(u))                        # Identity tensor
 F = ufl.variable(I + ufl.grad(u))               # Deformation tensor
+F_e = ufl.variable(F*invF_g)#*pow(J, -1 / 3)#                  # Elasticity tensor
+F_e_function, F_e_expression = ddf.to_tensor_map(F_e, mesh)
+F_function, F_expression = ddf.to_tensor_map(F_e*F_g, mesh)
 
+J = ufl.variable(ufl.det(F_e))                                # Determinant
+F_e_bar = F_e*pow(J, -1/3)
 
-J = ufl.det(F)                                # Determinant
-F_e = ufl.variable(F*invF_g)#*pow(J, -float(1) / 3)                  # Elasticity tensor
 E = 1/2*(F_e.T*F_e - I)                         # Difference tensor
-# C = ufl.variable(F_e.T * F_e)                   # Ratio tensor
-C = pow(J, -float(2) / 3) * F_e.T * F_e
+C = F_e.T * F_e
+C_bar = F_e_bar.T*F_e_bar
 
-Ic = ufl.variable(ufl.tr(C))                    # First invariant
-
+'''Constants'''
+#region
 El = df.default_scalar_type(1.0e4)
 nu = df.default_scalar_type(0.3)
 mu = df.fem.Constant(mesh, El / (2 * (1 + nu)))
 # mu = df.fem.Constant(mesh, 1.)
 lmbda = df.fem.Constant(mesh, El * nu / ((1 + nu) * (1 - 2 * nu)))
+#endregion
 
 # Compressible Neo-Hookean
-kappa = 1e3
-# psi = (mu / 2) * (Ic - 3) - mu * ufl.ln(J) + (lmbda / 2) * (ufl.ln(J))**2
-psi = (mu / 2) * (Ic - 3) + kappa * (J * ufl.ln(J) - J + 1)
-P = ufl.diff(psi, F)
+kappa = 1e4
+# psi_inc  = psi.neohookean(mu/2, C_bar)
+psi_inc  = psi.neohookean(mu/2, C_bar)
+psi_comp = psi.comp2(kappa, J) 
+psi_=  psi_inc + psi_comp
+P = ufl.diff(psi_, F_e)
 
 weak_form = ufl.inner(ufl.grad(v), P) * ufl.dx(metadata={"quadrature_degree": 8})
 
 '''Apply Boundary Conditions And Set Up Solver'''
-P_with_bcs, bcs = solv.apply_boundary_conditions(mesh, bc_values, weak_form, function_space, v, X)
+P_with_bcs = weak_form
+bcs, boundary_points = ddf.dirichlet_injection(mesh, bc_values, function_space)
+breakpoint()
 
+mesh.topology.create_connectivity(
+    mesh.topology.dim-1, mesh.topology.dim
+    )
+
+
+for name, tags in boundary_points.items():
+    facet_file = Path(f"ParaViewData/facet_tags_{name}.xdmf")
+    facet_file.unlink(missing_ok=True)
+    facet_file.with_suffix(".h5").unlink(missing_ok=True)
+    with XDMFFile(mesh.comm, facet_file, "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        breakpoint()
+        xdmf.write_meshtags(tags, mesh.geometry)
+
+breakpoint()
 print("Creating problem")
 problem = NonlinearProblem(P_with_bcs, u, bcs)
 print("Creating solver")
 solver = NewtonSolver(mesh.comm, problem)
 print("Solving")
 solver.solve(u)
+# solver.max_it = 500
 print("Done solving")
-us = []
-von_Mises_stresses = []
+
+# F_g_diff_function, F_g_diff_expression = ddf.to_tensor_map(F_g - F_g_old, mesh)
+us = []; strain_funcs = []; strain_funcs_00 = []; F_gs = []; F_es = []; Fs = []
+
 u_new = u.copy()
 us.append(u_new)
-driver_function_values = []
-grad_u_func_values = []
-'''Solve The Problem'''
-for i in np.arange(64):
-    print(i)
-    driver_function.interpolate(driver_expression)
-    driver_function_new = driver_function.copy()
-    driver_function_values.append(driver_function_new)
 
-    grad_u_func.interpolate(grad_u_expression)
-    grad_u_func_new = grad_u_func.copy()
-    grad_u_func_values.append(grad_u_func_new)
-    # previous_F_gff *= F_gff
+'''Solve The Problem'''
+for i in np.arange(8):
+
+    if (i-1)%8 == 0:
+        print(ddf.eval_expression(F_e, mesh))
+        print(i)
+
+    strain_function.interpolate(strain_expression)
+    F_g_function.interpolate(F_g_expression)
+    F_e_function.interpolate(F_e_expression)
+    F_function.interpolate(F_expression)
+    strain_function_00.interpolate(strain_expression_00)
+
+    strain_function_new = strain_function.copy()
+    strain_funcs.append(strain_function_new)
+    strain_function_00_new = strain_function_00.copy()
+    strain_funcs_00.append(strain_function_00_new)
+    
+    new_F_g = F_g_function.copy()
+    new_F_e = F_e_function.copy()
+    new_F = F_function.copy()
+    F_gs.append(new_F_g)
+
+    F_es.append(new_F_e)
+    Fs.append(new_F)
+
     solver.solve(u)
     u_new = u.copy()
     us.append(u_new)
-    print(solv.eval_expression(driver_function, mesh))
 
-pp.write_to_paraview("simple_growth.xdmf", mesh, us)
-pp.write_tensor_to_paraview("drivers.xdmf", mesh, driver_function_values)
-pp.write_tensor_to_paraview("gradu.xdmf", mesh, grad_u_func_values)
-# pp.write_vm_to_paraview("VonMissesStress.xdmf", mesh, von_Mises_stresses)
+F_g_diffs = []
+for x, y in zip(F_gs, F_gs[1:]):
+    F_g_h_function, F_g_h_expression = ddf.to_tensor_map(y - x, mesh)
+    F_g_h_function.interpolate(F_g_h_expression)
+    F_g_diffs.append(F_g_h_function)
+
+F_h_s = []
+for x, y in zip(Fs, Fs[1:]):
+    F_h_function, F_h_expression = ddf.to_tensor_map(y - x, mesh)
+    F_h_function.interpolate(F_h_expression)
+    F_h_s.append(F_h_function)
+
+pp.write_vector_to_paraview("ParaViewData/simple_growth.xdmf", mesh, us)
+pp.write_tensor_to_paraview("ParaViewData/drivers.xdmf", mesh, strain_funcs)
+pp.write_scalar_to_paraview("ParaViewData/driver_component.xdmf", mesh, strain_funcs_00)
+pp.write_tensor_to_paraview("ParaViewData/F_g.xdmf", mesh, F_gs)
+pp.write_tensor_to_paraview("ParaViewData/F_e.xdmf", mesh, F_es)
+pp.write_tensor_to_paraview("ParaViewData/F.xdmf", mesh, Fs)
+pp.write_tensor_to_paraview("ParaViewData/F_g_diffs.xdmf", mesh, F_g_diffs)
+pp.write_tensor_to_paraview("ParaViewData/F_h_s.xdmf", mesh, F_h_s)
