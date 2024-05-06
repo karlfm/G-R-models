@@ -64,36 +64,6 @@ def set_boundary_types(mesh, boundary_type, X):
 
     return facet_tags
 
-def apply_boundary_conditions(mesh, bc_values, P, function_space, v, X):
-    boundary_type = [(bc_values[i][0], bc_values[i + 1][0]) for i in range(0, len(bc_values), 2)]
-    facet_tags = set_boundary_types(mesh, boundary_type, X)
-    # plot_boundaries(mesh, facet_tags)
-    dx, ds, dS = get_measures(mesh)
-    no_bc, dirichlet, neumann, robin = 0, 1, 2, 3
-
-    boundary_conditions = []
-    dimension = mesh.topology.dim
-    boundary_dimension = dimension - 1
-    # uncomment line below if you are in a 2D mixed function space
-    # function_space = function_space.sub(0).collapse() 
-    coords = mesh.geometry.x
-
-    for value in bc_values:
-        bc_type, func = value
-        # for dirichelt bcs
-        if bc_type == dirichlet:
-            boundary_u = df.fem.Function(function_space)
-            boundary_u.interpolate(func)
-            facets = facet_tags.find(bc_type)
-            dofs = df.fem.locate_dofs_topological(function_space, boundary_dimension, facets)
-            dirichlet_boundary_condition = df.fem.dirichletbc(boundary_u, dofs)
-            boundary_conditions.append(dirichlet_boundary_condition)
-        elif bc_type == neumann:
-            # P += ufl.dot(func, v) *  ds(bc_type)
-            P -= ufl.inner(func, v) *  ds(bc_type)
-    #breakpoint()
-    return P, boundary_conditions, facet_tags
-
 def dirichlet_injection(mesh, bc_values, function_space):
 
     all_facet_tags = {}
@@ -119,69 +89,25 @@ def dirichlet_injection(mesh, bc_values, function_space):
 
     return boundary_conditions, all_facet_tags
 
-def apply_boundary_conditions_with_pressure(mesh, values, P, state_space, v, X):
-    # v is a test function
-    # values is a list of pairs (type, lambda) that take in coordinates and return values
-    # boundary_type = [(values[i][0], values[i + 1][0]) for i in range(0, len(values), 2)]
-    # facet_tags = set_boundary_types(mesh, boundary_type, X)
-    # dx, ds, dS = get_measures(mesh, facet_tags)
-    # no_bc, dirichlet, neumann, robin = 0, 1, 2, 3
-    # V, _ = state_space.sub(0).collapse()
-
-    # boundary_conditions = []
-    # dimension = mesh.topology.dim
-    # boundary_dimension = dimension - 1
-
-    # num_components = state_space.num_sub_spaces
-    # V0, _ = state_space.sub(0).collapse()    
-
-    # for value in values:
-    #     bc_type, func = value
-    #     if bc_type == dirichlet:
-    #         boundary_u = df.fem.Function(V)
-    #         boundary_u.interpolate(func)  # Use the i'th component of the boundary function
-    #         breakpoint()
-    #         facets = facet_tags.find(bc_type)
-    #         dofs = df.fem.locate_dofs_topological(V, boundary_dimension, facets)
-    #         dirichlet_boundary_condition = df.fem.dirichletbc(boundary_u, dofs)#, state_space.sub(0).sub(component)
-    #         boundary_conditions.append(dirichlet_boundary_condition)
-
-    #     elif bc_type == neumann:
-    #         P -= ufl.inner(func, v) * ds(bc_type)  # Use the i'th component of the test and boundary functions
-    # bcs = []
-    # boundary_type = [(values[i][0], values[i + 1][0]) for i in range(0, len(values), 2)]
-    # facet_tags = set_boundary_types(mesh, boundary_type, X)
-
-    # return P, bcs
-
-    coords = mesh.geometry.x
-    xmin = min(coords[:, 0])
-    ymin = min(coords[:, 1])
-    zmin = min(coords[:, 2])
-
-    xmin_bnd = lambda x : np.isclose(x[0], xmin)
-    ymin_bnd = lambda x : np.isclose(x[1], ymin)
-    zmin_bnd = lambda x : np.isclose(x[2], zmin)
-
-    bcs = []
+def neumann_injection(mesh, bc_info, P, v):
+    n = ufl.FacetNormal(mesh)
+    x = ufl.SpatialCoordinate(mesh)
     
-    # fix three of the boundaries in their respective planes
-    
-    bnd_funs = [xmin_bnd, ymin_bnd, zmin_bnd]
-    components = [0, 1, 2]
-    
-    V0, _ = state_space.sub(0).collapse()    
+    facet_indices, facet_markers = [], []
+    fdim = mesh.topology.dim - 1
+    for marker, locator, _ in bc_info:
+        facets = df.mesh.locate_entities(mesh, fdim, locator)
+        facet_indices.append(facets)
+        facet_markers.append(np.full_like(facets, marker))
+    facet_indices = np.hstack(facet_indices).astype(np.int32)
+    facet_markers = np.hstack(facet_markers).astype(np.int32)
+    sorted_facets = np.argsort(facet_indices)
+    facet_tag = df.mesh.meshtags(mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
 
-    for bnd_fun, comp in zip(bnd_funs, components):
-        V_c, _ = V0.sub(comp).collapse()
-        u_fixed = df.fem.Function(V_c)
-        u_fixed.vector.array[:] = 0
-        dofs = df.fem.locate_dofs_geometrical((state_space.sub(0).sub(comp),V_c), bnd_fun)
-        bc = df.fem.dirichletbc(u_fixed, dofs, state_space.sub(0).sub(comp))
-        bcs.append(bc)
-    
-    return P, bcs
+    for _, _, values in bc_info:  
+        P -= ufl.inner(values * v, n) * ufl.ds(subdomain_id=marker, subdomain_data=facet_tag)
 
+    return P
 
 def get_functions(mesh):
     vector_element = ufl.VectorElement(family="Lagrange", cell=mesh.ufl_cell(), degree=2) #, dim=mesh.geometry.dim
@@ -190,19 +116,6 @@ def get_functions(mesh):
     v = ufl.TestFunction(V)        # test function
 
     return V, u, v
-
-def get_mixed_functions(mesh):
-    #DOESNT WORK FOR ANY DEGREE OTHER THAN TWO AN ELEMENTS THAT ARENT TRIANGULAR
-    V = ufl.VectorElement(family="Lagrange", cell=mesh.ufl_cell(), degree=1) #, dim=mesh.geometry.dim
-    P = ufl.FiniteElement(family="Lagrange", cell=mesh.ufl_cell(), degree=1)
-    
-    state_space = df.fem.FunctionSpace(mesh, V * P)
-    state = df.fem.Function(state_space)
-
-    u, p = ufl.split(state)
-    v, q = ufl.TestFunctions(state_space)
-    
-    return state_space, state, u, p, v, q
 
 def to_scalar_map(f, mesh):
     # You have to interpolate the function like function.interpolate(expression)
