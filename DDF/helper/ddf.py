@@ -100,13 +100,27 @@ def dirichlet_injection_ellipsoid(geometry, bc_values, function_space):
 
 def neumann_injection_ellipsoid(geometry, bc_info, P, F, v):
 
+    neumann_bcs = []
+
     n = ufl.FacetNormal(geometry.mesh)
 
     for bc_location, value in bc_info:   # TODO: implement shear Neumann BC
         # n = value * ufl.cofac(F) * N
-        P += ufl.inner(v, value * ufl.cofac(F) * n) * ufl.ds(subdomain_id=geometry.markers[bc_location][0], subdomain_data=geometry.ffun)
+        neumann_bcs.append(ufl.inner(v, value * ufl.cofac(F) * n) * ufl.ds(subdomain_id=geometry.markers[bc_location][0], subdomain_data=geometry.ffun))
 
-    return P
+    return neumann_bcs
+
+def robin_injection_ellipsoid(geometry, bc_info, P, F, v, u):
+
+    robin_bcs = []
+
+    n = ufl.FacetNormal(geometry.mesh)
+
+    for bc_location, w1, w2 in bc_info:   # TODO: implement shear Neumann BC
+        # n = value * ufl.cofac(F) * N
+        robin_bcs.append(w1*(ufl.inner(v, (u - w2 * ufl.cofac(F) * n))) * ufl.ds(subdomain_id=geometry.markers[bc_location][0], subdomain_data=geometry.ffun))
+
+    return robin_bcs
 
 def neumann_injection(mesh, bc_info, P, v):
     n = ufl.FacetNormal(mesh)
@@ -128,24 +142,7 @@ def neumann_injection(mesh, bc_info, P, v):
     return P
 
 
-def robin_injection(mesh, bc_info, P, v):
-    n = ufl.FacetNormal(mesh)
-    
-    facet_indices, facet_markers = [], []
-    facet_dimension = mesh.topology.dim - 1
-    for marker, locator, _ in bc_info:
-        facets = dolfinx.mesh.locate_entities(mesh, facet_dimension, locator)
-        facet_indices.append(facets)
-        facet_markers.append(np.full_like(facets, marker))
-    facet_indices = np.hstack(facet_indices).astype(np.int32)
-    facet_markers = np.hstack(facet_markers).astype(np.int32)
-    sorted_facets = np.argsort(facet_indices)
-    facet_tag = dolfinx.mesh.meshtags(mesh, facet_dimension, facet_indices[sorted_facets], facet_markers[sorted_facets])
 
-    for marker, _, values in bc_info:  
-        P -= ufl.inner(values * v, n) * ufl.ds(subdomain_id=marker, subdomain_data=facet_tag)
-
-    return P
 
 
 
@@ -162,9 +159,6 @@ def get_facet_tags(mesh, marker, locator):
     facet_tag = dolfinx.mesh.meshtags(mesh, facet_dimension, facet_indices[sorted_facets], facet_markers[sorted_facets])
 
     return facet_tag
-
-
-
 
 def get_functions(mesh):
     # vector_element = ufl.vectorElement(family="Lagrange", cell=mesh.ufl_cell(), degree=1) #, dim=mesh.geometry.dim
@@ -213,60 +207,8 @@ def interpolate_quadrature(ufl_expr, mesh):
     expr_eval = expr_expr.eval(mesh, cells)
     return np.mean(expr_eval, axis=0)
 
-def get_measures(mesh):
-    # quadrature_degree tells the computer how many and where to evaluate the points
-    # "dx" tells the computer to integrate over the entire cell
-    dx = ufl.Measure("dx", domain=mesh)#, metadata={"quadrature_degree": 4})
-    # "ds" tells the computer to integrate over the exterior boundary
-    ds = ufl.Measure("ds", domain=mesh)
-                     #, metadata={"quadrature_degree": 4})
-    # "dS" tells the computer to integrate over the interior boundary
-    dS = ufl.Measure("dS", domain=mesh)#, metadata={"quadrature_degree": 4})
-    return dx, ds, dS
-
-def get_basic_tensors(u):
-
-    I = ufl.Identity(len(u))                      # Identity tensor
-    F = ufl.variable(I + ufl.grad(u))             # Deformation tensor
-    E = 1/2*(F.T*F - I)                           # Difference tensor
-    J = ufl.det(F)                                # Determinant
-    # C = pow(J, -float(2 / 3)) * F.T * F           # Ratio tensor
-    C = ufl.variable(F.T * F)
-    return I, F, J, C, E
-
-def get_stress_tensor(Psi, F):
-    sigma = ufl.diff(Psi, F)
-    return sigma
-
-def weak_form(sigma, test_function, dx):
-    ufl.inner(sigma, ufl.grad(test_function)) * dx
-
-def rhs(v, Psi, F, T, dx, ds):
-    # v = test function
-    # Psi = strain energy function
-    # F = deformation tensor
-    # T = boundary condition
-    # dx = I think a quadrature version of normal dx
-    # ds = I think a quadrature version of normal dx but 1D less
-    
-    P = ufl.diff(Psi, F)    # I think first Piola-Kirchoff tensor?
-    F_new = ufl.inner(P, ufl.grad(v)) * dx - ufl.inner(T, v)*ds     # Not sure about BC
-
-    return F_new
-
-def solver(F, u, bcs):
-    # F is deformation tensor
-    # u is solution
-    # bcs is a list of boundary condiiotns
-    problem = dolfinx.fem.petsc.NonlinearProblem(F, u, bcs)
-    return problem
-
-
 def main():
     return
 
 if __name__ == "__main__":
     main()
-
-# problem = dolfinx.fem.petsc.NonlinearProblem(weak_form, u, boundaryConditions)
-# solver = dolfinx.nls.petsc.NewtonSolver(mesh.comm, problem)

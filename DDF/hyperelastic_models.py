@@ -1,5 +1,6 @@
 import ufl
 
+'''Incompressible part'''
 def holzapfel(F):
     """
 
@@ -32,6 +33,9 @@ def holzapfel(F):
     W_f = a_f / (2 * b_f) * (ufl.exp(b_f * cond(I4e1 - 1) ** 2) - 1)
 
     return  W_hat + W_f
+
+def hookean(w, C):
+    return w*C
 
 def neohookean(w, C):
     """
@@ -95,30 +99,48 @@ def gent(mu, beta, C):
     I1 = ufl.tr(C)
     return -mu/(2*beta)*(ufl.ln(1 - beta*(I1 - 3)))
 
+def guccione(w1, w2, w3, w4, C):
+    """
+    Args:
+        mu - shear modulus
+        beta - controls the strain hardening property
+        C - Ratio (Cauchy) tensor
 
+    Returns:
+        psi(C), scalar function
+
+    """
+
+    E = 1/2*(C - ufl.Identity(3))
+    Q = w1*E[0,0]**2 + w2*(E[1,1]**2 + E[2,2]**2 + E[1,2]*E[2,1]) + w3*(2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
+    
+    return 1/2*w4*(ufl.exp(Q) - 1)
+
+'''Compressible part'''
 def comp1(mu_c , J):
     I3 = pow(J, 2)
     return mu_c*(I3 - 1)
 
 def comp2(mu_c , J):
-    I3 = pow(J, 2)
-    return mu_c*pow((ufl.sqrt(I3) - 1), 2)
+    return mu_c*pow((J - 1), 2)
 
 def comp3(mu_c , J):
     I3 = pow(J, 2)
     return mu_c*ufl.ln(I3)
 
 def comp4(mu_c , J):
-    I3 = pow(J, 2)
-    return mu_c*ufl.ln(ufl.sqrt(I3))
+    return mu_c*ufl.ln(J)
 
-def comp4(mu_1, mu_2, J):
+def comp5(mu_1, mu_2, J):
     I3 = pow(J, 2)
     return -mu_1/2*(I3 - 1) + mu_2/4*(pow((I3 - 1), 2))
 
-def comp5(w1, J):
+def comp6(w1, J):
     I3 = pow(J, 2)
     return w1 * (J * ufl.ln(J) - J + 1)*ufl.Identity(3)
+
+def comp7(w, J):
+    return 0.5*w*(J-1)*ufl.ln(J)
 
 def main():
     return
