@@ -21,9 +21,9 @@ import growth_laws
 
 #region
 '''Create Geometry'''
-x_min, x_max, Nx = 0, 1, 8
-y_min, y_max, Ny = 0, 1, 8
-z_min, z_max, Nz = 0, 1, 8
+x_min, x_max, Nx = 0, 1, 4
+y_min, y_max, Ny = 0, 1, 4
+z_min, z_max, Nz = 0, 1, 4
 xs = np.linspace(x_min, x_max, Nx)
 ys = np.linspace(y_min, y_max, Ny)
 zs = np.linspace(z_min, z_max, Nz)
@@ -33,43 +33,61 @@ mesh = geo.create_box(X)
 '''Get Functions'''
 function_space, u, v = ddf.get_functions(mesh)
 
+'''Boundary Conditions'''
+'''Dirichlet'''
 x_left_x  = (lambda x : np.isclose(x[0], x_min), 0, dolfinx.default_scalar_type(0))
 x_right_x = (lambda x : np.isclose(x[0], x_max), 0, dolfinx.default_scalar_type(0.2))
 x_left_y  = (lambda x : np.isclose(x[0], x_min), 1, dolfinx.default_scalar_type(0))
 x_right_y = (lambda x : np.isclose(x[0], x_max), 1, dolfinx.default_scalar_type(0))
 x_left_z  = (lambda x : np.isclose(x[0], x_min), 2, dolfinx.default_scalar_type(0))
 x_right_z = (lambda x : np.isclose(x[0], x_max), 2, dolfinx.default_scalar_type(0))
-y_left    = (lambda x : np.isclose(x[1], y_min), 1, dolfinx.default_scalar_type(0))
-z_left    = (lambda x : np.isclose(x[2], z_min), 2, dolfinx.default_scalar_type(0))
+y_left_y  = (lambda x : np.isclose(x[1], y_min), 1, dolfinx.default_scalar_type(0))
+z_left_z  = (lambda x : np.isclose(x[2], z_min), 2, dolfinx.default_scalar_type(0))
 z_right   = (lambda x : np.isclose(x[2], z_max), 2, dolfinx.default_scalar_type(0))
 
-bc_values = [x_left_x, x_left_y, x_left_z, x_right_x, x_right_y, x_right_z]#, y_left, z_left, z_right]
-#bc_values  = [x_right]
+# bc_values = [x_left_x, x_left_y, x_left_z, x_right_x, x_right_y, x_right_z]#, y_left_y, z_left_z]#, x_right_x, x_right_y, x_right_z]#, y_left, z_left, z_right]
+# bc_values = [x_left_x, x_left_y, x_left_z]
+bc_values  = [x_left_x, x_left_y, x_left_z, x_right_x, x_right_y, x_right_z]
 
-'''Create Stress Tensor'''
-strain = 1/2*(ufl.grad(u).T*ufl.grad(u) + ufl.grad(u).T + ufl.grad(u))
+'''Neumann'''
+neumann_x_right_x  = (1, lambda x : np.isclose(x[0], x_max), dolfinx.fem.Constant(mesh, 5000.0))
+neumann_bc_values = [neumann_x_right_x]
 
+'''Robin'''
+robin_y_right_y  = (2, lambda x : np.isclose(x[1], y_max), (dolfinx.fem.Constant(mesh, 1.0), dolfinx.fem.Constant(mesh, -1000.0)))
+robin_bc_values = [robin_y_right_y]
 
-X = ufl.SpatialCoordinate(mesh)     # get Identity without it being a constant
-F_0 = ufl.grad(X)                   # --//--    
-F_0_func, F0_form = ddf.to_tensor_map(F_0, mesh)
-V = dolfinx.fem.functionspace(mesh, basix.ufl.element(family="DG", cell=str(mesh.ufl_cell()), degree=0, shape=(3,3)))
-# F_0_func = dolfinx.fem.Function(V)       # this gets updated in the loop
-# F0_form = dolfinx.fem.Expression(F_0, V.element.interpolation_points())  # 
-F_0_func.interpolate(F0_form)
+natural_bcs = neumann_bc_values# + robin_bc_values
 
-strain_function, strain_expression = ddf.to_tensor_map(strain, mesh)
+'''Initiate first growth tensor'''
+X = ufl.SpatialCoordinate(mesh)       # get Identity without it being a constant
+F_g0 = ufl.variable(ufl.grad(X))                   # --//--    
+
+# Create function space to evaluate functions in -> create an expression -> create a function -> interpolate the expression
+function_space2 = dolfinx.fem.functionspace(mesh, basix.ufl.element(family="CG", cell=str(mesh.ufl_cell()), degree=2, shape=(3,3)))
+F_g_expression = dolfinx.fem.Expression(F_g0, function_space2.element.interpolation_points())
+F_g_function = dolfinx.fem.Function(function_space2)
+F_g_succ_function = dolfinx.fem.Function(function_space2)
+
+F_g_function.interpolate(F_g_expression)
+
 
 '''From the paper'''
 I = ufl.Identity(len(u))
 F = ufl.variable(I + ufl.grad(u))
-F_g = growth_laws.F_g1(strain_function, F_0_func) * F_0_func
-# I don't understand why the next line of code is needed
-# I think it is because we need to initiate the first previous total growth step to create the growth accumulation tensor
-strain_function.interpolate(strain_expression)
-F_g_prev = growth_laws.F_g1(strain_function, F_0_func)
-F_e = ufl.variable(F*ufl.inv(F_g))
+F_e = ufl.variable(F*ufl.inv(F_g_function))
 
+elastic_strain = 1/2*(F_e.T*F_e - ufl.Identity(3))
+set_point = 0.00
+F_g = ufl.as_tensor((
+    (1+0.01*ufl.sqrt(1 + 2*(elastic_strain[0, 0])) - set_point, 0, 0),
+    (0, 1+0.01*ufl.sqrt(1 + 2*(elastic_strain[1, 1])) - set_point, 0),
+    (0, 0, 1+0.01*ufl.sqrt(1 + 2*(elastic_strain[2, 2])) - set_point)))
+
+F_g_succ_expression = dolfinx.fem.Expression(F_g*F_g_function, function_space2.element.interpolation_points())
+F_g_succ_function.interpolate(F_g_succ_expression)
+
+#region
 J = ufl.variable(ufl.det(F_e))
 
 F_e_bar = F_e*pow(J, -1/3)
@@ -93,36 +111,31 @@ weak_form = ufl.inner(ufl.grad(v), P) * ufl.dx(metadata={"quadrature_degree": 8}
 
 '''Apply Boundary Conditions'''
 bcs, _ = ddf.dirichlet_injection(mesh, bc_values, function_space)
+# natural_bcs_applied = ddf.natural_injection(mesh, natural_bcs, F, v, u)
+
+# for bc in natural_bcs_applied:
+#     weak_form -= bc
 
 '''Assemble FEniCS solver'''
 problem = NonlinearProblem(weak_form, u, bcs)
 solver = NewtonSolver(mesh.comm, problem)
 
 us = []
-
-# solver.solve(u)
-# u_new = u.copy()
-# us.append(u_new)
+#endregion
 
 
 
 '''Solve The Problem'''
-for i in np.arange(16):
+n = pow(2, 3)
+for i in np.arange(n):
 
-    print(i)
-
-    # print(ddf.eval_expression(pow((1/2*(ufl.sqrt(2*strain_function[1,1] + 1) - 1/2 - 1) + 1), 1/3), mesh))
+    print("\n", i, "/", n-1, "\n")
+    # print(ddf.eval_expression(elastic_strain, mesh))
 
     solver.solve(u)
     u_new = u.copy()
     us.append(u_new)
-    #breakpoint()
-    ddf.eval_expression(strain, mesh)
 
-    # F_0_func creates an expression for F_g and then evaluates it (by using .interpolate()).
-    # Since F_0_func is part of the input for F_g; F_g updates everytime.
-    F_0_func.interpolate(dolfinx.fem.Expression(F_g_prev, V.element.interpolation_points()))
-    
-    strain_function.interpolate(strain_expression)
+    F_g_function.interpolate(F_g_succ_expression)
 
 pp.write_vector_to_paraview("ParaViewData/simple_growth.xdmf", mesh, us)
