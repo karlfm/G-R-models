@@ -79,6 +79,9 @@ c_th_slope  = 60
 def k_growth(F_g_cum: dolfinx.fem.Function, slope: int, F_50: dolfinx.fem.Function) -> dolfinx.fem.Function:
     return 1 / (1 + ufl.exp(slope * (F_g_cum - F_50)))
 
+def alg_max_princ_strain(E: dolfinx.fem.Function) -> dolfinx.fem.Function:
+    return (E[1,1] + E[2,2])/2 + ufl.sqrt(((E[1,1] - E[2,2])/2)**2 + (E[1,2]*E[2,1]))
+    # return E[1,1]
 s_function = dolfinx.fem.Function(tensor_space)
 
 dt = 0.1
@@ -93,9 +96,9 @@ F_gff = ufl.conditional(ufl.gt(t, 0),
 
 
 F_gcc = ufl.conditional(ufl.gt(t, 0),
-                    ufl.conditional(ufl.ge(s_function[1,1], 0), 
-                    ufl.sqrt(k_growth(F_g_tot_function[1,1], c_th_slope, F_cc50)*f_cc_max*dt/(1 + ufl.exp(-c_f*(s_function[1,1] - s_t50))) + 1), 
-                    ufl.sqrt(-f_cc_max*dt/(1 + ufl.exp(c_f*(s_function[1,1] + s_t50))) + 1)),
+                    ufl.conditional(ufl.ge(alg_max_princ_strain(s_function), 0), 
+                    ufl.sqrt(k_growth(F_g_tot_function[1,1], c_th_slope, F_cc50)*f_cc_max*dt/(1 + ufl.exp(-c_f*(alg_max_princ_strain(s_function) - s_t50))) + 1), 
+                    ufl.sqrt(-f_cc_max*dt/(1 + ufl.exp(c_f*(alg_max_princ_strain(s_function) + s_t50))) + 1)),
                     1.0)
 
 
@@ -104,11 +107,11 @@ F_g = ufl.as_tensor((
     (0, F_gcc, 0),
     (0, 0, F_gcc)))
 
-F_e = ufl.variable(F*ufl.inv(F_g))
+F_e = ufl.variable(F*ufl.inv(F_g_tot_function))
 
 F_g_tot = dolfinx.fem.Expression(F_g*F_g_tot_function, tensor_space.element.interpolation_points())
 
-s_expression = dolfinx.fem.Expression(0.5*(ufl.inv(F_g_tot_function.T)*F_e.T*F_e*ufl.inv(F_g_tot_function) - ufl.Identity(3)), tensor_space.element.interpolation_points())
+s_expression = dolfinx.fem.Expression(0.5*(F_e.T*F_e - ufl.Identity(3)), tensor_space.element.interpolation_points())
 
 #region
 J = ufl.variable(ufl.det(F_e))
@@ -154,12 +157,11 @@ N = 1000
 for i in range(N):
 
     t.value = i
-    
+ 
     F_g_tot_function.interpolate(F_g_tot)
     s_function.interpolate(s_expression)
 
     if i % 100 == 0:
-            
         print("Step ", i)
         print("s = ", ddf.eval_expression(s_function, mesh))
         print("F_g = ", ddf.eval_expression(F_g, mesh))
@@ -173,4 +175,5 @@ for i in range(N):
     F_g_f_tot.append(ddf.eval_expression(F_g_tot_function[0,0], mesh)[0,0])
     F_g_c_tot.append(ddf.eval_expression(F_g_tot_function[1,1], mesh)[0,0])
 
+breakpoint()
 pp.write_vector_to_paraview("ParaViewData/simple_growth.xdmf", mesh, us)
