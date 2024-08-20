@@ -12,6 +12,7 @@ import basix
 from typing import Optional
 
 sys.path.insert(1, '/home/shared/helper')
+sys.path.insert(1, '/home/shared/')
 
 import geometry as geo
 import ddf as ddf 
@@ -151,15 +152,16 @@ solver.solve(u)
 u_new = u.copy()
 us.append(u_new)
 
-F_g_f_tot = []; F_g_c_tot = []
+F_g_f_tot = []; F_g_c_tot = []; F_e_tot = []
 '''Solve The Problem'''
-N = 1000
+N = 1001
 for i in range(N):
 
     t.value = i
  
     F_g_tot_function.interpolate(F_g_tot)
     s_function.interpolate(s_expression)
+
 
     if i % 100 == 0:
         print("Step ", i)
@@ -172,8 +174,10 @@ for i in range(N):
     u_new = u.copy()
     us.append(u_new)
 
-    F_g_f_tot.append(ddf.eval_expression(F_g_tot_function[0,0], mesh)[0,0])
-    F_g_c_tot.append(ddf.eval_expression(F_g_tot_function[1,1], mesh)[0,0])
+    if i % 10 == 0:
+        F_g_f_tot.append(ddf.eval_expression(F_g_tot_function[0,0], mesh)[0,0])
+        F_g_c_tot.append(ddf.eval_expression(F_g_tot_function[1,1], mesh)[0,0])
+        F_e_tot.append(ddf.eval_expression(F_e[0,0], mesh)[0,0])
 
 breakpoint()
-pp.write_vector_to_paraview("ParaViewData/simple_growth.xdmf", mesh, us)
+pp.write_vector_to_paraview("../ParaViewData/simple_growth.xdmf", mesh, us)
