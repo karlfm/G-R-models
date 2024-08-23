@@ -12,6 +12,7 @@ import basix
 from typing import Optional
 
 sys.path.insert(1, '/home/shared/helper')
+sys.path.insert(1, '/home/shared/')
 
 import geometry as geo
 import ddf as ddf 
@@ -63,21 +64,6 @@ I = ufl.Identity(len(u))
 F = ufl.variable(I + ufl.grad(u))
 
 '''Constants from the paper'''
-#region
-
-f_ff_max    = 0.3
-f_f         = 150   
-s_l50       = 0.06
-F_ff50      = 1.35
-f_l_slope   = 40
-f_cc_max    = 0.1
-c_f         = 75
-s_t50       = 0.07
-F_cc50      = 1.28
-
-c_th_slope  = 60
-#endregion
-
 dt = 0.1
 
 t=dolfinx.fem.Constant(mesh, 0.0)

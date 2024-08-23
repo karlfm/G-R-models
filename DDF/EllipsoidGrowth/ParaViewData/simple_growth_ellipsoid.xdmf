@@ -1,0 +1,247 @@
+<?xml version="1.0"?>
+<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>
+<Xdmf Version="3.0" xmlns:xi="https://www.w3.org/2001/XInclude">
+  <Domain>
+    <Grid Name="Mesh" GridType="Uniform">
+      <Topology TopologyType="Tetrahedron" NumberOfElements="2808" NodesPerElement="4">
+        <DataItem Dimensions="2808 4" NumberType="Int" Format="HDF">simple_growth_ellipsoid.h5:/Mesh/Mesh/topology</DataItem>
+      </Topology>
+      <Geometry GeometryType="XYZ">
+        <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Mesh/Mesh/geometry</DataItem>
+      </Geometry>
+    </Grid>
+    <Grid Name="f" GridType="Collection" CollectionType="Temporal">
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="0" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/0</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="1" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/1</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="2" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/2</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="3" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/3</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="4" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/4</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="5" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/5</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="6" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/6</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="7" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/7</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="8" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/8</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="9" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/9</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="10" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/10</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="11" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/11</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="12" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/12</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="13" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/13</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="14" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/14</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="15" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/15</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="16" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/16</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="17" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/17</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="18" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/18</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="19" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/19</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="20" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/20</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="21" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/21</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="22" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/22</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="23" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/23</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="24" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/24</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="25" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/25</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="26" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/26</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="27" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/27</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="28" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/28</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="29" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/29</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="30" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/30</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="31" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/31</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="f" GridType="Uniform">
+        <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
+        <Time Value="32" />
+        <Attribute Name="f" AttributeType="Vector" Center="Node">
+          <DataItem Dimensions="767 3" Format="HDF">simple_growth_ellipsoid.h5:/Function/f/32</DataItem>
+        </Attribute>
+      </Grid>
+    </Grid>
+  </Domain>
+</Xdmf>
