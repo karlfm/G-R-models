@@ -51,3 +51,12 @@ def write_tensor_to_paraview(filename, mesh, tensors):
     for i, tensor in enumerate(tensors):
         function.interpolate(tensor)
         fout.write_function(function, i)
+
+def format_number(num):
+    return f"{num:.15f}".rstrip('0').rstrip('.')  # Adjust 15 to your desired precision
+
+def write_lists_to_file(filename, lists_dict):
+    with open(filename, 'w') as f:
+        for name, lst in lists_dict.items():
+            formatted_list = [format_number(x) if isinstance(x, float) else str(x) for x in lst]
+            f.write(f"{name} = [{', '.join(formatted_list)}]\n\n")
