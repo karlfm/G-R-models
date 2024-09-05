@@ -8,7 +8,7 @@ from dolfinx.io import XDMFFile
 from petsc4py import PETSc
 import basix
 
-sys.path.insert(1, '/home/shared/MyCode/DDF/helper')
+sys.path.insert(1, '/home/shared/helper')
 
 import geometry as geo
 import ddf as ddf 
@@ -85,9 +85,9 @@ F_gff = ufl.conditional(ufl.ge(E_e_function[0,0], 0),
                         -f_ff_max*dt/(1 + ufl.exp(f_f*(E_e_function[0,0] + s_l50))) + 1)
 
 # Growth in the cross-fiber direction
-F_gcc = ufl.conditional(ufl.ge(E_e_function[1,1], 0), 
-                        ufl.sqrt(k_growth(F_g_tot_function[1,1], c_th_slope, F_cc50)*f_cc_max*dt/(1 + ufl.exp(-c_f*(E_e_function[1,1] - s_t50))) + 1), 
-                        ufl.sqrt(-f_cc_max*dt/(1 + ufl.exp(c_f*(E_e_function[1,1] + s_t50))) + 1))
+F_gcc = ufl.conditional(ufl.ge(alg_max_princ_strain(E_e_function), 0), 
+                        ufl.sqrt(k_growth(F_g_tot_function[1,1], c_th_slope, F_cc50)*f_cc_max*dt/(1 + ufl.exp(-c_f*(alg_max_princ_strain(E_e_function) - s_t50))) + 1), 
+                        ufl.sqrt(-f_cc_max*dt/(1 + ufl.exp(c_f*(alg_max_princ_strain(E_e_function) + s_t50))) + 1))
 
 # Incremental growth tensor
 F_g = ufl.as_tensor((
@@ -135,7 +135,7 @@ solver = NewtonSolver(mesh.comm, problem)
 us = []; F_g_f_tot = []; F_g_c_tot = []; F_e11_list = []; F_e22_list = []; F_e33_list = []; J_e = []; J_g = []; J_g_tot = []; J_tot = []
 
 '''Solve The Problem'''
-N = 1000   # Number of time steps
+N = 10000   # Number of time steps
 for i in range(0, N+1):
 
     # Tabulate values for postprocessing
