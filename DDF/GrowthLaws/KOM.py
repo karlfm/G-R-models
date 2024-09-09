@@ -14,6 +14,7 @@ import geometry as geo
 import ddf as ddf 
 import postprocessing as pp
 import hyperelastic_models as psi
+import growth_laws as gl
 #region
 
 '''Create Geometry'''
@@ -46,73 +47,22 @@ bc_values  = [x_left_x, y_left_y, z_left_z, x_right_x]
 neumann_x_right = (1, lambda x : np.isclose(x[0], x_max), dolfinx.default_scalar_type(0.1))
 natural_bcs = []
 
-'''Initiate first growth tensor'''
-tensor_space = dolfinx.fem.functionspace(mesh, basix.ufl.element(family="DG", cell=str(mesh.ufl_cell()), degree=0, shape=(3,3)))
-X = ufl.SpatialCoordinate(mesh)       # get Identity without it being a constant
-Identity = ufl.variable(ufl.grad(X)) 
-Identity_expression = dolfinx.fem.Expression(Identity, tensor_space.element.interpolation_points())
-
-F_g_tot_function = dolfinx.fem.Function(tensor_space); F_g_tot_function.interpolate(Identity_expression)
-E_e_function = dolfinx.fem.Function(tensor_space); E_e_function.interpolate(Identity_expression)
-
 '''Kinematics'''
 I = ufl.Identity(len(u))
 F = ufl.variable(I + ufl.grad(u))
 
-'''Constants from the paper'''
-f_ff_max    = 0.3
-f_f         = 150   
-s_l50       = 0.06
-F_ff50      = 1.35
-f_l_slope   = 40
-f_cc_max    = 0.1
-c_f         = 75
-s_t50       = 0.07
-F_cc50      = 1.28
-c_th_slope  = 60
+F_g_tot_function, F_g_tot_expression, E_e_function, E_e_expression, F_e = gl.KOM(mesh, F)
 
-'''Growth Laws'''
-def k_growth(F_g_cum: dolfinx.fem.Function, slope: int, F_50: dolfinx.fem.Function) -> dolfinx.fem.Function:
-    return 1 / (1 + ufl.exp(slope * (F_g_cum - F_50)))
-
-def alg_max_princ_strain(E: dolfinx.fem.Function) -> dolfinx.fem.Function:
-    return (E[1,1] + E[2,2])/2 + ufl.sqrt(((E[1,1] - E[2,2])/2)**2 + (E[1,2]*E[2,1]))
-
-dt = 0.1
-# Growth in the fiber direction
-F_gff = ufl.conditional(ufl.ge(E_e_function[0,0], 0), 
-                        k_growth(F_g_tot_function[0,0], f_l_slope, F_ff50)*f_ff_max*dt/(1 + ufl.exp(-f_f*(E_e_function[0,0] - s_l50))) + 1, 
-                        -f_ff_max*dt/(1 + ufl.exp(f_f*(E_e_function[0,0] + s_l50))) + 1)
-
-# Growth in the cross-fiber direction
-F_gcc = ufl.conditional(ufl.ge(alg_max_princ_strain(E_e_function), 0), 
-                        ufl.sqrt(k_growth(F_g_tot_function[1,1], c_th_slope, F_cc50)*f_cc_max*dt/(1 + ufl.exp(-c_f*(alg_max_princ_strain(E_e_function) - s_t50))) + 1), 
-                        ufl.sqrt(-f_cc_max*dt/(1 + ufl.exp(c_f*(alg_max_princ_strain(E_e_function) + s_t50))) + 1))
-
-# Incremental growth tensor
-F_g = ufl.as_tensor((
-    (F_gff, 0, 0),
-    (0, F_gcc, 0),
-    (0, 0, F_gcc)))
-
-# Elastic deformation tensor
-F_e = ufl.variable(F*ufl.inv(F_g_tot_function))
-
-# Expressions used to update total growth tensor and elastic deformation tensor
-F_g_tot_expression = dolfinx.fem.Expression(F_g*F_g_tot_function, tensor_space.element.interpolation_points())
-E_e_expression = dolfinx.fem.Expression(0.5*(F_e.T*F_e - ufl.Identity(3)), tensor_space.element.interpolation_points())
-
-# Determinant and right Cauchy-Green tensor
-J = ufl.variable(ufl.det(F_e))
 C_e = F_e.T*F_e
+J_e = ufl.det(F_e)
 
 '''Constants'''
-mu = dolfinx.default_scalar_type(15)
+mu = dolfinx.default_scalar_type(1)
 kappa = dolfinx.default_scalar_type(1e4)
 
 '''Create compressible strain energy function'''
 psi_inc  = psi.neohookean(mu/2, C_e)
-psi_comp = psi.comp2(kappa, J) 
+psi_comp = psi.comp2(kappa, J_e) 
 psi_=  psi_inc + psi_comp
 P = ufl.diff(psi_, F_e)
 
@@ -132,27 +82,22 @@ problem = NonlinearProblem(weak_form, u, bcs)
 solver = NewtonSolver(mesh.comm, problem)
 
 # Preallocate lists for postprocessing
-us = []; F_g_f_tot = []; F_g_c_tot = []; F_e11_list = []; F_e22_list = []; F_e33_list = []; J_e = []; J_g = []; J_g_tot = []; J_tot = []
+us = []; F_g_f_tot = []; F_g_c_tot = []; F_e11_list = []; F_e22_list = []; F_e33_list = []; J_e = []; J_g = []; J_g_tot = []; J_tot = []; max_strn = []; k_growth_list1 = []; k_growth_list2 = []; E_e00_list = []; E_e11_list = []; F_gf = []; F_gc = []; 
 
 '''Solve The Problem'''
-N = 10000   # Number of time steps
+N = 2000   # Number of time steps
 for i in range(0, N+1):
 
-    # Tabulate values for postprocessing
-    if i % 50 == 0:
+    if i % 100 == 0:
         print(f"Time step {i}/{N}")
+        # breakpoint()
+
+    # Tabulate values for postprocessing
+    if i % 10 == 0:
         u_new = u.copy()
         us.append(u_new)    
         F_g_f_tot.append(ddf.eval_expression(F_g_tot_function[0,0], mesh)[0,0])
         F_g_c_tot.append(ddf.eval_expression(F_g_tot_function[1,1], mesh)[0,0])
-        F_e11_list.append(ddf.eval_expression(F_e[0,0], mesh)[0,0])
-        F_e22_list.append(ddf.eval_expression(F_e[1,1], mesh)[0,0])
-        F_e33_list.append(ddf.eval_expression(F_e[2,2], mesh)[0,0])
-
-        J_e.append(dolfinx.fem.assemble_scalar(dolfinx.fem.form((ufl.det(F_e))*ufl.dx(metadata={"quadrature_degree": 8}))))
-        J_g.append(dolfinx.fem.assemble_scalar(dolfinx.fem.form((ufl.det(F_g))*ufl.dx(metadata={"quadrature_degree": 8}))))
-        J_tot.append(dolfinx.fem.assemble_scalar(dolfinx.fem.form((ufl.det(F))*ufl.dx(metadata={"quadrature_degree": 8}))))
-        J_g_tot.append(dolfinx.fem.assemble_scalar(dolfinx.fem.form((ufl.det(F_g_tot_function))*ufl.dx(metadata={"quadrature_degree": 8}))))
     
     solver.solve(u)     # Solve the problem
 
@@ -161,15 +106,8 @@ for i in range(0, N+1):
 
 '''Write to file to plot in Desmos and Paraview'''
 lists_to_write = {
-    "J_e": J_e,
-    "J_g": J_g,
-    "J": J_tot,
-    "J_{gtot}": J_g_tot,
-    "F_{gff}": F_g_f_tot,
-    "F_{gcc}": F_g_c_tot,
-    "F_{e11}": F_e11_list,
-    "F_{e22}": F_e22_list,
-    "F_{e33}": F_e33_list
+    "F_{totgff}": F_g_f_tot,
+    "F_{totgcc}": F_g_c_tot
 }
 
 pp.write_lists_to_file("simulation_results.txt", lists_to_write)
